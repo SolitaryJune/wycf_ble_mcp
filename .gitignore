@@ -1,0 +1,17 @@
+.venv/
+__pycache__/
+*.py[cod]
+*.egg-info/
+.DS_Store
+
+# Captured/generated challenge artifacts; keep source and docs publishable.
+artifacts/*
+!artifacts/.gitkeep
+
+# Local logs and crash output.
+*.log
+*.crash
+
+# Build output.
+build/
+dist/

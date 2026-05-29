@@ -1,0 +1,695 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>TryFun BHMAX BLE 控制台</title>
+  <style>
+    :root {
+      color-scheme: dark;
+      --bg: #0c1017;
+      --card: #141b26;
+      --muted: #8792a2;
+      --text: #ecf2ff;
+      --line: #263246;
+      --accent: #59a6ff;
+      --danger: #ff6767;
+      --ok: #5dde9b;
+      --warn: #ffc857;
+    }
+
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      background: radial-gradient(circle at top left, #18243a 0, var(--bg) 38rem);
+      color: var(--text);
+      font: 15px/1.5 ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    }
+
+    main {
+      width: min(980px, calc(100vw - 28px));
+      margin: 24px auto 40px;
+    }
+
+    h1 { margin: 0 0 8px; font-size: 28px; }
+    h2 { margin: 0 0 14px; font-size: 18px; }
+    p { margin: 0; color: var(--muted); }
+    code { color: #c5dcff; }
+
+    .grid {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 14px;
+      margin-top: 18px;
+    }
+
+    .card {
+      background: color-mix(in srgb, var(--card) 92%, transparent);
+      border: 1px solid var(--line);
+      border-radius: 18px;
+      padding: 18px;
+      box-shadow: 0 18px 60px rgb(0 0 0 / 25%);
+    }
+
+    .wide { grid-column: 1 / -1; }
+
+    .row {
+      display: flex;
+      gap: 10px;
+      align-items: center;
+      flex-wrap: wrap;
+      margin-top: 10px;
+    }
+
+    button, input, select {
+      border: 1px solid var(--line);
+      border-radius: 12px;
+      background: #0f1520;
+      color: var(--text);
+      padding: 10px 12px;
+      font: inherit;
+    }
+
+    button {
+      cursor: pointer;
+      background: #1c2839;
+      transition: transform 120ms ease, border-color 120ms ease, background 120ms ease;
+    }
+
+    button:hover { transform: translateY(-1px); border-color: var(--accent); }
+    button.primary { background: #11365e; border-color: #245d94; }
+    button.danger { background: #4a1820; border-color: #86313b; }
+    button.heat { background: #4a2f12; border-color: #8e651d; }
+    button:disabled { cursor: not-allowed; opacity: .45; transform: none; }
+
+    input[type="range"] {
+      width: min(100%, 460px);
+      padding: 0;
+      accent-color: var(--accent);
+    }
+
+    input[type="number"] { width: 94px; }
+    input[type="text"] { min-width: 260px; flex: 1; }
+
+    label {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      color: var(--muted);
+      user-select: none;
+    }
+
+    .pill {
+      display: inline-flex;
+      align-items: center;
+      gap: 7px;
+      border: 1px solid var(--line);
+      border-radius: 999px;
+      padding: 7px 10px;
+      color: var(--muted);
+      background: #0f1520;
+    }
+
+    .dot {
+      width: 8px;
+      height: 8px;
+      border-radius: 999px;
+      background: var(--danger);
+      box-shadow: 0 0 16px currentColor;
+    }
+
+    .dot.ok { background: var(--ok); }
+    .dot.warn { background: var(--warn); }
+
+    .kv {
+      display: grid;
+      grid-template-columns: 150px 1fr;
+      gap: 6px 12px;
+      margin-top: 12px;
+      color: var(--muted);
+    }
+
+    .kv strong {
+      color: var(--text);
+      font-weight: 600;
+      overflow-wrap: anywhere;
+    }
+
+    .big-value {
+      font-size: 42px;
+      font-weight: 700;
+      letter-spacing: -0.04em;
+      color: #d9eaff;
+    }
+
+    .meter {
+      width: min(100%, 520px);
+      height: 18px;
+      overflow: hidden;
+      border: 1px solid var(--line);
+      border-radius: 999px;
+      background: #0a0f17;
+    }
+
+    .meter > span {
+      display: block;
+      width: 0%;
+      height: 100%;
+      background: linear-gradient(90deg, var(--ok), var(--accent), var(--warn));
+      transition: width 80ms linear;
+    }
+
+    pre {
+      height: 260px;
+      overflow: auto;
+      margin: 12px 0 0;
+      padding: 12px;
+      border: 1px solid var(--line);
+      border-radius: 14px;
+      background: #080c12;
+      color: #b9c7d9;
+      white-space: pre-wrap;
+      word-break: break-word;
+    }
+
+    .hint { margin-top: 10px; font-size: 13px; color: var(--muted); }
+
+    @media (max-width: 760px) {
+      .grid { grid-template-columns: 1fr; }
+      .kv { grid-template-columns: 1fr; }
+    }
+  </style>
+</head>
+<body>
+  <main>
+    <header>
+      <h1>TryFun BHMAX BLE 控制台</h1>
+      <p>单文件 Web Bluetooth 页面。已集成伸缩 <code>ffb7/0x0c</code>、加热 <code>ffb5/0x05</code>、通知 <code>ffb8</code>。</p>
+    </header>
+
+    <section class="grid">
+      <div class="card wide">
+        <h2>连接</h2>
+        <div class="row">
+          <button id="connectBtn" class="primary">连接 TF-BHMAX</button>
+          <button id="disconnectBtn" disabled>断开</button>
+          <span class="pill"><span id="statusDot" class="dot"></span><span id="statusText">未连接</span></span>
+        </div>
+        <div class="kv">
+          <span>目标服务</span><strong>0000ffac-0000-1000-8000-00805f9b34fb</strong>
+          <span>设备</span><strong id="deviceName">-</strong>
+          <span>通知状态</span><strong id="notifyState">-</strong>
+        </div>
+        <p class="hint">建议用 Chrome/Edge 打开 <code>http://localhost:8000/web/index.html</code>。选择设备时点 <code>TF-BHMAX</code>。</p>
+      </div>
+
+      <div class="card">
+        <h2>伸缩控制</h2>
+        <div class="big-value"><span id="levelValue">0</span><small>%</small></div>
+        <div class="row">
+          <input id="levelSlider" type="range" min="0" max="100" value="0">
+        </div>
+        <div class="row">
+          <button id="sendLevelBtn" class="primary" disabled>发送当前强度</button>
+          <button id="stopBtn" class="danger" disabled>伸缩归零</button>
+          <label><input id="liveSlider" type="checkbox">拖动实时发送</label>
+        </div>
+        <p class="hint">帧格式：<code>[seq, 02, 00, 03, 0c, level, checksum]</code>，写入 <code>ffb7</code>。</p>
+      </div>
+
+      <div class="card">
+        <h2>加热控制</h2>
+        <div class="big-value" id="heatValue">OFF</div>
+        <div class="row">
+          <button id="heatOnBtn" class="heat" disabled>加热开</button>
+          <button id="heatOffBtn" disabled>加热关</button>
+        </div>
+        <p class="hint">来自日志样本 <code>010200030501fa</code>：命令 <code>0x05</code>，level <code>1/0</code>，写入 <code>ffb5</code>。</p>
+      </div>
+
+      <div class="card wide">
+        <h2>音频联动</h2>
+        <div class="row">
+          <select id="audioMode">
+            <option value="mic">音频输入设备（内置/外置麦克风）</option>
+            <option value="display">屏幕/系统音频捕获</option>
+          </select>
+          <select id="audioDeviceSelect"></select>
+          <button id="refreshAudioBtn">刷新音频设备</button>
+          <button id="startAudioBtn" class="primary">开始联动</button>
+          <button id="testPulseBtn">模拟音量测试</button>
+          <button id="stopAudioBtn" disabled>停止联动</button>
+        </div>
+        <div class="row">
+          <div class="meter"><span id="audioMeterBar"></span></div>
+          <span class="pill"><span id="audioDot" class="dot"></span><span id="audioState">未启动</span></span>
+          <span class="pill">音量 <strong id="audioVolume">0%</strong></span>
+          <span class="pill">发送强度 <strong id="audioTarget">0</strong></span>
+        </div>
+        <div class="row">
+          <label>阈值 <input id="audioThreshold" type="number" min="0" max="90" value="1"></label>
+          <label>增益 <input id="audioGain" type="number" min="0.1" max="20" step="0.1" value="8.0"></label>
+          <label>放大倍数 <input id="audioMultiplier" type="range" min="0.1" max="100" step="0.1" value="1.0"><strong id="audioMultiplierValue">1.0x</strong></label>
+          <label>上限 <input id="audioMaxLevel" type="number" min="0" max="100" value="100"></label>
+          <label>间隔ms <input id="audioInterval" type="number" min="80" max="1000" value="120"></label>
+          <label>变化阈值 <input id="audioDelta" type="number" min="0" max="50" value="1"></label>
+          <label><input id="audioLogWrites" type="checkbox">记录每次发送</label>
+          <label><input id="audioStopZero" type="checkbox" checked>停止时归零</label>
+        </div>
+        <p class="hint">先连接 BLE，再点“开始联动”。麦克风模式可选择内置/外置输入；屏幕/系统音频在 Chrome 里通常要选择“Chrome 标签页”并勾选“共享标签页音频”。映射公式：超过阈值的 RMS 音量 × 增益 × 放大倍数 → 伸缩强度。</p>
+      </div>
+
+      <div class="card wide">
+        <h2>Raw / 调试</h2>
+        <div class="row">
+          <select id="rawChar">
+            <option value="ffb7">ffb7 write-without-response</option>
+            <option value="ffb5">ffb5 write-with-response</option>
+          </select>
+          <input id="rawHex" type="text" placeholder="例如 080200030c4aaa">
+          <button id="sendRawBtn" disabled>发送 raw hex</button>
+        </div>
+        <div class="row">
+          <input id="cmdId" type="number" min="0" max="255" value="12">
+          <input id="cmdLevel" type="number" min="0" max="255" value="0">
+          <button id="buildRawBtn">按 command_id/level 生成</button>
+        </div>
+        <pre id="log"></pre>
+      </div>
+    </section>
+  </main>
+
+  <script>
+    "use strict";
+
+    const UUIDS = {
+      service: "0000ffac-0000-1000-8000-00805f9b34fb",
+      telescopicWrite: "0000ffb7-0000-1000-8000-00805f9b34fb",
+      heatingWrite: "0000ffb5-0000-1000-8000-00805f9b34fb",
+      notify: "0000ffb8-0000-1000-8000-00805f9b34fb",
+    };
+
+    const COMMAND_TELESCOPIC = 0x0c;
+    const COMMAND_HEATING = 0x05;
+
+    let device = null;
+    let server = null;
+    let service = null;
+    let telescopicChar = null;
+    let heatingChar = null;
+    let notifyChar = null;
+    let seq = Math.floor(performance.now() / 100) & 0x0f;
+    let liveTimer = null;
+    let audioContext = null;
+    let audioStream = null;
+    let audioAnalyser = null;
+    let audioData = null;
+    let audioAnimation = 0;
+    let audioLastSendAt = 0;
+    let audioLastSentLevel = -1;
+    let audioSendBusy = false;
+    let testPulseTimer = null;
+
+    const $ = (id) => document.getElementById(id);
+
+    function setConnected(connected, message) {
+      $("statusDot").className = "dot " + (connected ? "ok" : "");
+      $("statusText").textContent = message || (connected ? "已连接" : "未连接");
+      $("connectBtn").disabled = connected;
+      $("disconnectBtn").disabled = !connected;
+      $("sendLevelBtn").disabled = !connected;
+      $("stopBtn").disabled = !connected;
+      $("heatOnBtn").disabled = !connected;
+      $("heatOffBtn").disabled = !connected;
+      $("sendRawBtn").disabled = !connected;
+      if (!connected && audioAnalyser) {
+        setAudioState(true, "仅检测音频，未连接 BLE");
+      }
+    }
+
+    function log(line, data) {
+      const time = new Date().toLocaleTimeString();
+      const suffix = data === undefined ? "" : " " + (typeof data === "string" ? data : JSON.stringify(data));
+      $("log").textContent = `[${time}] ${line}${suffix}\n` + $("log").textContent;
+    }
+
+    function nextSeq() {
+      seq = (seq + 1) & 0x0f;
+      return seq;
+    }
+
+    function toHex(bytes) {
+      return Array.from(bytes, (b) => b.toString(16).padStart(2, "0")).join("");
+    }
+
+    function clamp(value, min, max) {
+      return Math.min(max, Math.max(min, value));
+    }
+
+    function hexToBytes(value) {
+      const clean = value.replace(/[^0-9a-fA-F]/g, "");
+      if (!clean || clean.length % 2 !== 0) {
+        throw new Error("hex 为空或长度不是偶数");
+      }
+      const out = new Uint8Array(clean.length / 2);
+      for (let i = 0; i < out.length; i += 1) {
+        out[i] = parseInt(clean.slice(i * 2, i * 2 + 2), 16);
+      }
+      return out;
+    }
+
+    function buildFrame(commandId, level, explicitSeq) {
+      const cmd = Number(commandId) & 0xff;
+      const value = Number(level) & 0xff;
+      const frameSeq = explicitSeq === undefined ? nextSeq() : (Number(explicitSeq) & 0xff);
+      const checksum = (-(cmd + value)) & 0xff;
+      return new Uint8Array([frameSeq, 0x02, 0x00, 0x03, cmd, value, checksum]);
+    }
+
+    async function writeCharacteristic(characteristic, bytes, withResponse) {
+      if (withResponse && characteristic.writeValueWithResponse) {
+        await characteristic.writeValueWithResponse(bytes);
+      } else if (!withResponse && characteristic.writeValueWithoutResponse) {
+        await characteristic.writeValueWithoutResponse(bytes);
+      } else {
+        await characteristic.writeValue(bytes);
+      }
+    }
+
+    async function connect() {
+      if (!navigator.bluetooth) {
+        throw new Error("当前浏览器不支持 Web Bluetooth；请用 Chrome/Edge 打开 localhost 页面");
+      }
+
+      device = await navigator.bluetooth.requestDevice({
+        acceptAllDevices: true,
+        optionalServices: [UUIDS.service],
+      });
+      device.addEventListener("gattserverdisconnected", onDisconnected);
+      $("deviceName").textContent = `${device.name || "(无名设备)"} / ${device.id}`;
+      setConnected(false, "连接中...");
+
+      server = await device.gatt.connect();
+      service = await server.getPrimaryService(UUIDS.service);
+      telescopicChar = await service.getCharacteristic(UUIDS.telescopicWrite);
+      heatingChar = await service.getCharacteristic(UUIDS.heatingWrite);
+      notifyChar = await service.getCharacteristic(UUIDS.notify);
+
+      await notifyChar.startNotifications();
+      notifyChar.addEventListener("characteristicvaluechanged", onNotify);
+      $("notifyState").textContent = "已订阅 ffb8";
+      setConnected(true, "已连接");
+      log("connected", device.name || device.id);
+    }
+
+    function onDisconnected() {
+      if (audioAnalyser) {
+        stopAudioReactive(false);
+      }
+      server = service = telescopicChar = heatingChar = notifyChar = null;
+      $("notifyState").textContent = "-";
+      setConnected(false, "已断开");
+      log("disconnected");
+    }
+
+    async function disconnect() {
+      if (device?.gatt?.connected) {
+        device.gatt.disconnect();
+      } else {
+        onDisconnected();
+      }
+    }
+
+    async function setTelescopic(level, options = {}) {
+      if (!telescopicChar) throw new Error("未连接 ffb7");
+      const value = Math.max(0, Math.min(100, Number(level) || 0));
+      const frame = buildFrame(COMMAND_TELESCOPIC, value);
+      await writeCharacteristic(telescopicChar, frame, false);
+      if (!options.quiet) {
+        log(`${options.label || "telescopic"}=${value}`, toHex(frame));
+      }
+      return value;
+    }
+
+    async function setHeating(on) {
+      if (!heatingChar) throw new Error("未连接 ffb5");
+      const frame = buildFrame(COMMAND_HEATING, on ? 1 : 0);
+      await writeCharacteristic(heatingChar, frame, true);
+      $("heatValue").textContent = on ? "ON" : "OFF";
+      log(`heating=${on ? 1 : 0}`, toHex(frame));
+    }
+
+    function onNotify(event) {
+      const view = event.target.value;
+      const bytes = new Uint8Array(view.buffer.slice(view.byteOffset, view.byteOffset + view.byteLength));
+      const hex = toHex(bytes);
+      if (bytes.length === 7 && bytes[1] === 0x07) {
+        log(`notify ack cmd=0x${bytes[4].toString(16).padStart(2, "0")} level=${bytes[5]}`, hex);
+        return;
+      }
+
+      if (bytes.length === 19) {
+        const fields = {};
+        for (let i = 8; i < bytes.length - 1; i += 2) {
+          fields[`0x${bytes[i].toString(16).padStart(2, "0")}`] = bytes[i + 1];
+        }
+        if (Object.prototype.hasOwnProperty.call(fields, "0x05")) {
+          $("heatValue").textContent = fields["0x05"] ? "ON" : "OFF";
+        }
+        log("notify status", { hex, fields });
+        return;
+      }
+
+      log("notify", hex);
+    }
+
+    async function refreshAudioDevices(requestPermission = false) {
+      if (!navigator.mediaDevices?.enumerateDevices) {
+        $("audioDeviceSelect").innerHTML = '<option value="">浏览器不支持音频设备枚举</option>';
+        return;
+      }
+
+      let permissionStream = null;
+      if (requestPermission) {
+        try {
+          permissionStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+        } catch (err) {
+          log("audio permission", err.message);
+        } finally {
+          permissionStream?.getTracks().forEach((track) => track.stop());
+        }
+      }
+
+      const devices = await navigator.mediaDevices.enumerateDevices();
+      const inputs = devices.filter((item) => item.kind === "audioinput");
+      $("audioDeviceSelect").innerHTML = "";
+      const defaultOption = new Option("默认输入设备", "");
+      $("audioDeviceSelect").append(defaultOption);
+      inputs.forEach((item, index) => {
+        $("audioDeviceSelect").append(new Option(item.label || `音频输入 ${index + 1}`, item.deviceId));
+      });
+      log("audio devices", inputs.map((item, index) => item.label || `audioinput-${index + 1}`).join(", ") || "none");
+    }
+
+    function setAudioState(running, text) {
+      $("audioDot").className = "dot " + (running ? "ok" : "");
+      $("audioState").textContent = text;
+      $("startAudioBtn").disabled = running;
+      $("stopAudioBtn").disabled = !running;
+    }
+
+    async function startAudioReactive() {
+      stopAudioReactive(false);
+      if (!navigator.mediaDevices) {
+        throw new Error("当前浏览器不支持 mediaDevices");
+      }
+
+      if ($("audioMode").value === "display") {
+        audioStream = await navigator.mediaDevices.getDisplayMedia({ audio: true, video: true });
+        if (audioStream.getAudioTracks().length === 0) {
+          stopAudioReactive(false);
+          throw new Error("没有捕获到系统/屏幕音频轨道");
+        }
+      } else {
+        const deviceId = $("audioDeviceSelect").value;
+        const audio = deviceId
+          ? { deviceId: { exact: deviceId }, echoCancellation: false, noiseSuppression: false, autoGainControl: false }
+          : { echoCancellation: false, noiseSuppression: false, autoGainControl: false };
+        audioStream = await navigator.mediaDevices.getUserMedia({ audio });
+      }
+
+      audioContext = new AudioContext();
+      audioAnalyser = audioContext.createAnalyser();
+      audioAnalyser.fftSize = 1024;
+      audioAnalyser.smoothingTimeConstant = 0.35;
+      audioData = new Uint8Array(audioAnalyser.fftSize);
+      audioContext.createMediaStreamSource(audioStream).connect(audioAnalyser);
+      audioLastSendAt = 0;
+      audioLastSentLevel = -1;
+      setAudioState(true, telescopicChar ? "联动中" : "仅检测音频，未连接 BLE");
+      log("audio reactive started", $("audioMode").value);
+      analyzeAudio();
+    }
+
+    function stopAudioReactive(sendZero = true) {
+      if (audioAnimation) {
+        cancelAnimationFrame(audioAnimation);
+        audioAnimation = 0;
+      }
+      if (testPulseTimer) {
+        clearInterval(testPulseTimer);
+        testPulseTimer = null;
+      }
+      audioStream?.getTracks().forEach((track) => track.stop());
+      audioStream = null;
+      audioAnalyser = null;
+      audioData = null;
+      if (audioContext) {
+        audioContext.close().catch(() => {});
+        audioContext = null;
+      }
+      $("audioMeterBar").style.width = "0%";
+      $("audioVolume").textContent = "0%";
+      $("audioTarget").textContent = "0";
+      setAudioState(false, "未启动");
+      if (sendZero && $("audioStopZero").checked && telescopicChar) {
+        setTelescopic(0, { label: "audio-stop" }).catch((err) => log("audio stop error", err.message));
+      }
+    }
+
+    function updateAudioDisplay(volume, targetLevel) {
+      $("audioMeterBar").style.width = `${volume}%`;
+      $("audioVolume").textContent = `${volume}%`;
+      $("audioTarget").textContent = String(targetLevel);
+    }
+
+    function analyzeAudio() {
+      if (!audioAnalyser || !audioData) return;
+
+      audioAnalyser.getByteTimeDomainData(audioData);
+      let sum = 0;
+      for (const item of audioData) {
+        const centered = (item - 128) / 128;
+        sum += centered * centered;
+      }
+
+      const rms = Math.sqrt(sum / audioData.length);
+      const displayPercent = clamp(Math.round(rms * 350), 0, 100);
+      const threshold = clamp(Number($("audioThreshold").value) || 0, 0, 90) / 100;
+      const gain = clamp(Number($("audioGain").value) || 1, 0.1, 20);
+      const multiplier = clamp(Number($("audioMultiplier").value) || 1, 0.1, 100);
+      const maxLevel = clamp(Number($("audioMaxLevel").value) || 0, 0, 100);
+      const interval = clamp(Number($("audioInterval").value) || 150, 80, 1000);
+      const delta = clamp(Number($("audioDelta").value) || 0, 0, 50);
+      const normalized = clamp(((rms - threshold) / Math.max(0.01, 0.45 - threshold)) * gain, 0, 1);
+      const targetLevel = Math.round(clamp(normalized * maxLevel * multiplier, 0, 100));
+
+      updateAudioDisplay(displayPercent, targetLevel);
+
+      const now = performance.now();
+      const shouldSend = telescopicChar
+        && now - audioLastSendAt >= interval
+        && Math.abs(targetLevel - audioLastSentLevel) >= delta;
+      if (shouldSend && !audioSendBusy) {
+        audioSendBusy = true;
+        audioLastSendAt = now;
+        audioLastSentLevel = targetLevel;
+        setTelescopic(targetLevel, {
+          label: "audio",
+          quiet: !$("audioLogWrites").checked,
+        }).catch((err) => log("audio write error", err.message))
+          .finally(() => {
+            audioSendBusy = false;
+          });
+      }
+
+      audioAnimation = requestAnimationFrame(analyzeAudio);
+    }
+
+    function startTestPulse() {
+      if (testPulseTimer) {
+        clearInterval(testPulseTimer);
+        testPulseTimer = null;
+        setAudioState(Boolean(audioAnalyser), audioAnalyser ? (telescopicChar ? "联动中" : "仅检测音频，未连接 BLE") : "未启动");
+        return;
+      }
+
+      let step = 0;
+      setAudioState(true, telescopicChar ? "模拟发送中" : "模拟显示，未连接 BLE");
+      log("test pulse started");
+      testPulseTimer = setInterval(() => {
+        const wave = Math.abs(Math.sin(step / 6));
+        const targetLevel = Math.round(wave * 80);
+        updateAudioDisplay(Math.round(wave * 100), targetLevel);
+        if (telescopicChar) {
+          setTelescopic(targetLevel, {
+            label: "test-pulse",
+            quiet: !$("audioLogWrites").checked,
+          }).catch((err) => log("test pulse error", err.message));
+        }
+        step += 1;
+      }, 140);
+    }
+
+    function bind() {
+      $("connectBtn").addEventListener("click", () => connect().catch((err) => log("connect error", err.message)));
+      $("disconnectBtn").addEventListener("click", () => disconnect().catch((err) => log("disconnect error", err.message)));
+      $("refreshAudioBtn").addEventListener("click", () => refreshAudioDevices(true).catch((err) => log("audio devices error", err.message)));
+      $("startAudioBtn").addEventListener("click", () => startAudioReactive().catch((err) => {
+        stopAudioReactive(false);
+        log("audio start error", err.message);
+      }));
+      $("stopAudioBtn").addEventListener("click", () => stopAudioReactive(true));
+      $("testPulseBtn").addEventListener("click", () => startTestPulse());
+      $("audioMultiplier").addEventListener("input", () => {
+        $("audioMultiplierValue").textContent = `${Number($("audioMultiplier").value).toFixed(1)}x`;
+      });
+
+      $("levelSlider").addEventListener("input", () => {
+        $("levelValue").textContent = $("levelSlider").value;
+        if ($("liveSlider").checked && telescopicChar) {
+          clearTimeout(liveTimer);
+          liveTimer = setTimeout(() => setTelescopic($("levelSlider").value).catch((err) => log("telescopic error", err.message)), 100);
+        }
+      });
+
+      $("sendLevelBtn").addEventListener("click", () => setTelescopic($("levelSlider").value).catch((err) => log("telescopic error", err.message)));
+      $("stopBtn").addEventListener("click", () => {
+        $("levelSlider").value = "0";
+        $("levelValue").textContent = "0";
+        setTelescopic(0).catch((err) => log("stop error", err.message));
+      });
+
+      $("heatOnBtn").addEventListener("click", () => setHeating(true).catch((err) => log("heating error", err.message)));
+      $("heatOffBtn").addEventListener("click", () => setHeating(false).catch((err) => log("heating error", err.message)));
+
+      $("buildRawBtn").addEventListener("click", () => {
+        const frame = buildFrame(Number($("cmdId").value), Number($("cmdLevel").value));
+        $("rawHex").value = toHex(frame);
+        log("build raw", $("rawHex").value);
+      });
+
+      $("sendRawBtn").addEventListener("click", async () => {
+        try {
+          const bytes = hexToBytes($("rawHex").value);
+          const useHeatChar = $("rawChar").value === "ffb5";
+          const characteristic = useHeatChar ? heatingChar : telescopicChar;
+          if (!characteristic) throw new Error("未连接目标特征");
+          await writeCharacteristic(characteristic, bytes, useHeatChar);
+          log(`raw write ${$("rawChar").value}`, toHex(bytes));
+        } catch (err) {
+          log("raw error", err.message);
+        }
+      });
+    }
+
+    bind();
+    refreshAudioDevices(false).catch((err) => log("audio devices error", err.message));
+    setConnected(false, navigator.bluetooth ? "未连接" : "浏览器不支持 Web Bluetooth");
+    setAudioState(false, "未启动");
+    if (!navigator.bluetooth) {
+      $("connectBtn").disabled = true;
+    }
+  </script>
+</body>
+</html>

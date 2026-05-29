@@ -1,0 +1,28 @@
+[build-system]
+requires = ["setuptools>=69", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "tryfun-ble-mcp"
+version = "0.1.0"
+description = "Local BLE, Web Bluetooth, and MCP controller for the TryFun BHMAX CTF target."
+readme = "README.md"
+requires-python = ">=3.11"
+license = { text = "MIT" }
+dependencies = [
+  "bleak",
+  "mcp",
+]
+
+[project.scripts]
+ble-mcp = "ble_mcp.cli:main"
+tryfun-ble-mcp-server = "ble_mcp.server:main"
+
+[tool.setuptools]
+packages = ["ble_mcp"]
+
+[tool.setuptools.package-dir]
+ble_mcp = "."
+
+[tool.setuptools.package-data]
+ble_mcp = ["web/*.html"]
