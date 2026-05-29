@@ -21,7 +21,7 @@ def _load_request(path: str) -> tuple[str, dict[str, Any]]:
 
 
 async def _dispatch(operation: str, payload: dict[str, Any]) -> Any:
-    from ble_mcp.ble import discover, notify_for, scan, write_raw
+    from ble_mcp.ble import discover, notify_for, scan, write_raw, write_raw_sequence
 
     if operation == "scan":
         return await scan(
@@ -39,6 +39,16 @@ async def _dispatch(operation: str, payload: dict[str, Any]) -> Any:
             response=bool(payload.get("response", False)),
             timeout=float(payload.get("timeout", 20.0)),
             allow_ota=bool(payload.get("allow_ota", False)),
+        )
+    if operation == "write_raw_sequence":
+        return await write_raw_sequence(
+            address=str(payload["address"]),
+            characteristic_uuid=str(payload["characteristic_uuid"]),
+            payload_hexes=[str(item) for item in payload["payload_hexes"]],
+            response=bool(payload.get("response", False)),
+            timeout=float(payload.get("timeout", 20.0)),
+            allow_ota=bool(payload.get("allow_ota", False)),
+            interval_ms=int(payload.get("interval_ms", 0)),
         )
     if operation == "notify_for":
         return await notify_for(

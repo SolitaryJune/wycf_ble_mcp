@@ -86,6 +86,10 @@ notify                    0000ffb8-0000-1000-8000-00805f9b34fb
   - 名称构帧：`telescopic` / `伸缩` / `heating` / `heat` / `加热`。
 - `build_telescopic_frame(level, seq=None)`
   - 构造伸缩帧，写入 `ffb7`。
+- `build_random_telescopic_frame(min_level=0, max_level=100, seq=None)`
+  - 在范围内随机取一个伸缩强度，并构造单个 `ffb7` 帧。
+- `build_random_telescopic_sequence(count=10, min_level=0, max_level=100, interval_ms=500, seq=None)`
+  - 构造有限随机自动模式帧序列。`count` 会限制在 `1..1000`，`interval_ms` 会限制在 `50..60000`。
 - `build_heating_frame(on, seq=None)`
   - 构造加热开关帧，写入 `ffb5`。
 - `decode_control_notify(payload_hex)`
@@ -95,6 +99,10 @@ notify                    0000ffb8-0000-1000-8000-00805f9b34fb
 
 - `set_telescopic_level(address, level, seq=None, response=False, timeout=20.0)`
   - 设置伸缩强度 `0..100`。
+- `set_random_telescopic_level(address, min_level=0, max_level=100, seq=None, timeout=20.0)`
+  - 随机取一个伸缩强度并立即发送。
+- `run_random_telescopic_sequence(address, count=10, min_level=0, max_level=100, interval_ms=500, stop_after=True, seq=None, timeout=20.0)`
+  - 在一次 BLE 连接内运行有限随机自动模式；默认结束后追加一次归零帧。
 - `stop_telescopic(address, seq=None, timeout=20.0)`
   - 伸缩归零。
 - `set_heating(address, on, seq=None, timeout=20.0)`
@@ -137,6 +145,30 @@ set_telescopic_level(
 
 ```text
 stop_telescopic(address="32D7BA9B-008B-6312-B4D6-0A6FAA6B26D0")
+```
+
+### 随机自动模式
+
+构造单个随机帧：
+
+```text
+build_random_telescopic_frame(
+  min_level=10,
+  max_level=90
+)
+```
+
+运行 20 次随机自动模式，每 500ms 一次，结束后归零：
+
+```text
+run_random_telescopic_sequence(
+  address="32D7BA9B-008B-6312-B4D6-0A6FAA6B26D0",
+  count=20,
+  min_level=10,
+  max_level=90,
+  interval_ms=500,
+  stop_after=true
+)
 ```
 
 ### 打开加热

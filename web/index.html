@@ -184,7 +184,7 @@
   <main>
     <header>
       <h1>TryFun BHMAX BLE 控制台</h1>
-      <p>单文件 Web Bluetooth 页面。已集成伸缩 <code>ffb7/0x0c</code>、加热 <code>ffb5/0x05</code>、通知 <code>ffb8</code>。</p>
+      <p>单文件 Web Bluetooth 页面。已集成伸缩 <code>ffb7/0x0c</code>、加热 <code>ffb5/0x05</code>、随机自动模式、通知 <code>ffb8</code>。</p>
     </header>
 
     <section class="grid">
@@ -225,6 +225,25 @@
           <button id="heatOffBtn" disabled>加热关</button>
         </div>
         <p class="hint">来自日志样本 <code>010200030501fa</code>：命令 <code>0x05</code>，level <code>1/0</code>，写入 <code>ffb5</code>。</p>
+      </div>
+
+      <div class="card wide">
+        <h2>自动随机模式</h2>
+        <div class="row">
+          <label>最小强度 <input id="randomMin" type="number" min="0" max="100" value="0"></label>
+          <label>最大强度 <input id="randomMax" type="number" min="0" max="100" value="100"></label>
+          <label>间隔ms <input id="randomInterval" type="number" min="80" max="60000" value="500"></label>
+          <button id="startRandomBtn" class="primary" disabled>开始随机</button>
+          <button id="stopRandomBtn" disabled>停止随机</button>
+        </div>
+        <div class="row">
+          <div class="meter"><span id="randomMeterBar"></span></div>
+          <span class="pill"><span id="randomDot" class="dot"></span><span id="randomState">未启动</span></span>
+          <span class="pill">当前随机强度 <strong id="randomTarget">0</strong></span>
+          <label><input id="randomLogWrites" type="checkbox">记录每次发送</label>
+          <label><input id="randomStopZero" type="checkbox" checked>停止时归零</label>
+        </div>
+        <p class="hint">每个周期在最小/最大强度之间随机取一个整数并发送到 <code>ffb7</code>。启动随机模式会自动停止音频联动/模拟音量，避免多个模式抢写。</p>
       </div>
 
       <div class="card wide">
@@ -309,6 +328,8 @@
     let audioLastSentLevel = -1;
     let audioSendBusy = false;
     let testPulseTimer = null;
+    let randomTimer = null;
+    let randomSendBusy = false;
 
     const $ = (id) => document.getElementById(id);
 
@@ -322,6 +343,9 @@
       $("heatOnBtn").disabled = !connected;
       $("heatOffBtn").disabled = !connected;
       $("sendRawBtn").disabled = !connected;
+      if (!randomTimer) {
+        $("startRandomBtn").disabled = !connected;
+      }
       if (!connected && audioAnalyser) {
         setAudioState(true, "仅检测音频，未连接 BLE");
       }
@@ -405,6 +429,9 @@
     function onDisconnected() {
       if (audioAnalyser) {
         stopAudioReactive(false);
+      }
+      if (randomTimer) {
+        stopRandomAuto(false);
       }
       server = service = telescopicChar = heatingChar = notifyChar = null;
       $("notifyState").textContent = "-";
@@ -498,8 +525,76 @@
       $("stopAudioBtn").disabled = !running;
     }
 
+    function setRandomState(running, text) {
+      $("randomDot").className = "dot " + (running ? "ok" : "");
+      $("randomState").textContent = text;
+      $("startRandomBtn").disabled = running || !telescopicChar;
+      $("stopRandomBtn").disabled = !running;
+    }
+
+    function randomRange() {
+      const first = clamp(Number($("randomMin").value) || 0, 0, 100);
+      const second = clamp(Number($("randomMax").value) || 0, 0, 100);
+      return [Math.min(first, second), Math.max(first, second)];
+    }
+
+    function updateRandomDisplay(level) {
+      $("randomMeterBar").style.width = `${level}%`;
+      $("randomTarget").textContent = String(level);
+      $("levelSlider").value = String(level);
+      $("levelValue").textContent = String(level);
+    }
+
+    async function randomTick() {
+      if (!randomTimer || !telescopicChar || randomSendBusy) return;
+      const [minLevel, maxLevel] = randomRange();
+      const targetLevel = Math.floor(Math.random() * (maxLevel - minLevel + 1)) + minLevel;
+      updateRandomDisplay(targetLevel);
+      randomSendBusy = true;
+      try {
+        await setTelescopic(targetLevel, {
+          label: "random",
+          quiet: !$("randomLogWrites").checked,
+        });
+      } catch (err) {
+        log("random write error", err.message);
+      } finally {
+        randomSendBusy = false;
+      }
+    }
+
+    function startRandomAuto() {
+      if (!telescopicChar) {
+        throw new Error("请先连接 BLE");
+      }
+      stopAudioReactive(false);
+      stopRandomAuto(false);
+      const interval = clamp(Number($("randomInterval").value) || 500, 80, 60000);
+      setRandomState(true, "随机中");
+      log("random auto started", { interval_ms: interval, range: randomRange() });
+      randomTimer = setInterval(() => {
+        randomTick().catch((err) => log("random tick error", err.message));
+      }, interval);
+      randomTick().catch((err) => log("random tick error", err.message));
+    }
+
+    function stopRandomAuto(sendZero = true) {
+      if (randomTimer) {
+        clearInterval(randomTimer);
+        randomTimer = null;
+      }
+      randomSendBusy = false;
+      $("randomMeterBar").style.width = "0%";
+      $("randomTarget").textContent = "0";
+      setRandomState(false, "未启动");
+      if (sendZero && $("randomStopZero").checked && telescopicChar) {
+        setTelescopic(0, { label: "random-stop" }).catch((err) => log("random stop error", err.message));
+      }
+    }
+
     async function startAudioReactive() {
       stopAudioReactive(false);
+      stopRandomAuto(false);
       if (!navigator.mediaDevices) {
         throw new Error("当前浏览器不支持 mediaDevices");
       }
@@ -614,6 +709,7 @@
         return;
       }
 
+      stopRandomAuto(false);
       let step = 0;
       setAudioState(true, telescopicChar ? "模拟发送中" : "模拟显示，未连接 BLE");
       log("test pulse started");
@@ -641,6 +737,14 @@
       }));
       $("stopAudioBtn").addEventListener("click", () => stopAudioReactive(true));
       $("testPulseBtn").addEventListener("click", () => startTestPulse());
+      $("startRandomBtn").addEventListener("click", () => {
+        try {
+          startRandomAuto();
+        } catch (err) {
+          log("random start error", err.message);
+        }
+      });
+      $("stopRandomBtn").addEventListener("click", () => stopRandomAuto(true));
       $("audioMultiplier").addEventListener("input", () => {
         $("audioMultiplierValue").textContent = `${Number($("audioMultiplier").value).toFixed(1)}x`;
       });
@@ -655,6 +759,8 @@
 
       $("sendLevelBtn").addEventListener("click", () => setTelescopic($("levelSlider").value).catch((err) => log("telescopic error", err.message)));
       $("stopBtn").addEventListener("click", () => {
+        stopAudioReactive(false);
+        stopRandomAuto(false);
         $("levelSlider").value = "0";
         $("levelValue").textContent = "0";
         setTelescopic(0).catch((err) => log("stop error", err.message));
@@ -687,6 +793,7 @@
     refreshAudioDevices(false).catch((err) => log("audio devices error", err.message));
     setConnected(false, navigator.bluetooth ? "未连接" : "浏览器不支持 Web Bluetooth");
     setAudioState(false, "未启动");
+    setRandomState(false, "未启动");
     if (!navigator.bluetooth) {
       $("connectBtn").disabled = true;
     }

@@ -6,7 +6,7 @@ from typing import Any
 
 from . import bridge
 from .audio_level import read_system_volume
-from .ble import discover, notify_for, run, scan, write_raw
+from .ble import discover, notify_for, run, scan, write_raw, write_raw_sequence
 from .known import (
     CONFIRMED_CONTROL_COMMANDS,
     CONFIRMED_CONTROL_UUIDS,
@@ -28,6 +28,8 @@ from .protocol import (
     describe_audio_level_frame,
     describe_heating_frame,
     describe_level_frame,
+    describe_random_telescopic_frame,
+    describe_random_telescopic_sequence,
     describe_telescopic_frame,
     map_audio_level,
 )
@@ -119,6 +121,22 @@ def cmd_build_telescopic(args: argparse.Namespace) -> None:
     print_json(describe_telescopic_frame(args.level, args.seq))
 
 
+def cmd_build_random(args: argparse.Namespace) -> None:
+    print_json(describe_random_telescopic_frame(args.min_level, args.max_level, args.seq))
+
+
+def cmd_build_random_sequence(args: argparse.Namespace) -> None:
+    print_json(
+        describe_random_telescopic_sequence(
+            args.count,
+            args.min_level,
+            args.max_level,
+            args.interval_ms,
+            args.seq,
+        )
+    )
+
+
 def cmd_build_heating(args: argparse.Namespace) -> None:
     print_json(describe_heating_frame(args.on, args.seq))
 
@@ -158,6 +176,56 @@ def cmd_telescopic(args: argparse.Namespace) -> None:
             )
         )
     )
+
+
+def cmd_random(args: argparse.Namespace) -> None:
+    generated = describe_random_telescopic_frame(args.min_level, args.max_level, args.seq)
+    frame = generated["frame"]
+    result = run(
+        write_raw(
+            args.address,
+            CONTROL_WRITE_UUID,
+            frame["payload_hex"],
+            response=False,
+            timeout=args.timeout,
+            allow_ota=False,
+        )
+    )
+    result["random"] = generated
+    print_json(result)
+
+
+def cmd_random_loop(args: argparse.Namespace) -> None:
+    sequence = describe_random_telescopic_sequence(
+        args.count,
+        args.min_level,
+        args.max_level,
+        args.interval_ms,
+        args.seq,
+    )
+    frames = list(sequence["frames"])
+    stop_frame = None
+    if args.stop_after:
+        last_seq = int(frames[-1]["seq"]) if frames else 0
+        stop_frame = describe_telescopic_frame(0, (last_seq + 1) & 0xFF)
+        frames.append(stop_frame)
+
+    result = run(
+        write_raw_sequence(
+            args.address,
+            CONTROL_WRITE_UUID,
+            [frame["payload_hex"] for frame in frames],
+            response=False,
+            timeout=args.timeout,
+            allow_ota=False,
+            interval_ms=sequence["interval_ms"],
+        )
+    )
+    result["sequence"] = sequence
+    result["stop_after"] = bool(args.stop_after)
+    if stop_frame is not None:
+        result["stop_frame"] = stop_frame
+    print_json(result)
 
 
 def cmd_heating(args: argparse.Namespace) -> None:
@@ -263,6 +331,20 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--seq", type=lambda x: int(x, 0), default=None)
     p.set_defaults(func=cmd_build_telescopic)
 
+    p = sub.add_parser("build-random", help="build one random telescopic frame")
+    p.add_argument("--min-level", type=int, default=0)
+    p.add_argument("--max-level", type=int, default=100)
+    p.add_argument("--seq", type=lambda x: int(x, 0), default=None)
+    p.set_defaults(func=cmd_build_random)
+
+    p = sub.add_parser("build-random-sequence", help="build a finite random telescopic frame sequence")
+    p.add_argument("--count", type=int, default=10)
+    p.add_argument("--min-level", type=int, default=0)
+    p.add_argument("--max-level", type=int, default=100)
+    p.add_argument("--interval-ms", type=int, default=500)
+    p.add_argument("--seq", type=lambda x: int(x, 0), default=None)
+    p.set_defaults(func=cmd_build_random_sequence)
+
     p = sub.add_parser("build-heating", help="build a heating on/off frame")
     state = p.add_mutually_exclusive_group(required=True)
     state.add_argument("--on", action="store_true")
@@ -298,6 +380,25 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--response", action=argparse.BooleanOptionalAction, default=False)
     p.add_argument("--timeout", type=float, default=20.0)
     p.set_defaults(func=cmd_telescopic)
+
+    p = sub.add_parser("random", help="pick and send one random telescopic level")
+    p.add_argument("address")
+    p.add_argument("--min-level", type=int, default=0)
+    p.add_argument("--max-level", type=int, default=100)
+    p.add_argument("--seq", type=lambda x: int(x, 0), default=None)
+    p.add_argument("--timeout", type=float, default=20.0)
+    p.set_defaults(func=cmd_random)
+
+    p = sub.add_parser("random-loop", help="run a finite random telescopic auto-mode sequence")
+    p.add_argument("address")
+    p.add_argument("--count", type=int, default=10)
+    p.add_argument("--min-level", type=int, default=0)
+    p.add_argument("--max-level", type=int, default=100)
+    p.add_argument("--interval-ms", type=int, default=500)
+    p.add_argument("--stop-after", action=argparse.BooleanOptionalAction, default=True)
+    p.add_argument("--seq", type=lambda x: int(x, 0), default=None)
+    p.add_argument("--timeout", type=float, default=20.0)
+    p.set_defaults(func=cmd_random_loop)
 
     p = sub.add_parser("stop", help="set Black Hole Max telescopic level to 0")
     p.add_argument("address")

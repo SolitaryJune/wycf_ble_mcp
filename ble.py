@@ -277,6 +277,65 @@ async def write_raw(
         }
 
 
+async def write_raw_sequence(
+    address: str,
+    characteristic_uuid: str,
+    payload_hexes: list[str],
+    *,
+    response: bool = False,
+    timeout: float = 20.0,
+    allow_ota: bool = False,
+    interval_ms: int = 0,
+) -> dict[str, Any]:
+    if not payload_hexes:
+        raise ValueError("payload_hexes must not be empty")
+
+    interval = max(0, int(interval_ms))
+    if _should_use_macos_helper():
+        return await asyncio.to_thread(
+            _run_macos_helper,
+            "write_raw_sequence",
+            {
+                "address": address,
+                "characteristic_uuid": characteristic_uuid,
+                "payload_hexes": payload_hexes,
+                "response": response,
+                "timeout": timeout,
+                "allow_ota": allow_ota,
+                "interval_ms": interval,
+            },
+            timeout + (len(payload_hexes) * interval / 1000.0) + 30.0,
+        )
+
+    characteristic_uuid = characteristic_uuid.lower()
+    if not allow_ota and characteristic_uuid == OTA_WRITE_UUID:
+        raise ValueError("refusing to write OTA characteristic without allow_ota=True")
+    payloads = [bytes.fromhex(normalize_hex(payload_hex)) for payload_hex in payload_hexes]
+
+    bleak = _import_bleak()
+    writes: list[dict[str, Any]] = []
+    async with bleak.BleakClient(address, timeout=timeout) as client:
+        for index, payload in enumerate(payloads):
+            await client.write_gatt_char(characteristic_uuid, payload, response=response)
+            writes.append(
+                {
+                    "index": index,
+                    "payload_hex": payload.hex(),
+                    "length": len(payload),
+                }
+            )
+            if interval > 0 and index < len(payloads) - 1:
+                await asyncio.sleep(interval / 1000.0)
+    return {
+        "address": address,
+        "characteristic_uuid": characteristic_uuid,
+        "count": len(writes),
+        "interval_ms": interval,
+        "response": response,
+        "writes": writes,
+    }
+
+
 async def notify_for(
     address: str,
     characteristic_uuid: str,

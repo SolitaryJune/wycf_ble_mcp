@@ -60,6 +60,14 @@ python -m ble_mcp.cli telescopic "32D7BA9B-008B-6312-B4D6-0A6FAA6B26D0" 74
 python -m ble_mcp.cli telescopic "32D7BA9B-008B-6312-B4D6-0A6FAA6B26D0" 0
 ```
 
+随机自动模式：
+
+```bash
+python -m ble_mcp.cli build-random --min-level 10 --max-level 90
+python -m ble_mcp.cli random "32D7BA9B-008B-6312-B4D6-0A6FAA6B26D0" --min-level 10 --max-level 90
+python -m ble_mcp.cli random-loop "32D7BA9B-008B-6312-B4D6-0A6FAA6B26D0" --count 20 --interval-ms 500 --min-level 10 --max-level 90 --stop-after
+```
+
 开关加热：
 
 ```bash
@@ -95,6 +103,7 @@ http://localhost:8000/web/index.html
 - Web Bluetooth 连接 `TF-BHMAX`
 - 伸缩滑杆：`ffb7 + command_id 0x0c`
 - 加热开关：`ffb5 + command_id 0x05`
+- 自动随机模式：按配置间隔在最小/最大强度内随机发送伸缩强度
 - 音频联动：可选内置/外置麦克风，或浏览器支持时捕获屏幕/系统音频，按实时音量映射伸缩强度
 - 订阅 `ffb8` notify 并显示状态/ack
 - raw hex 发送和命令帧生成
@@ -165,11 +174,15 @@ cd /Users/a24
 - `build_control_level_frame`
 - `build_named_control_frame`
 - `build_telescopic_frame`
+- `build_random_telescopic_frame`
+- `build_random_telescopic_sequence`
 - `build_heating_frame`
 - `decode_control_notify`
 - `map_audio_to_level`
 - `build_audio_level_frame`
 - `set_telescopic_level`
+- `set_random_telescopic_level`
+- `run_random_telescopic_sequence`
 - `stop_telescopic`
 - `set_heating`
 - `set_control_level`

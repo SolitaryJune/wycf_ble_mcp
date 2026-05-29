@@ -6,6 +6,7 @@ the Spring Yuanli/TryFun app controlling a Black Hole Max device.
 
 from __future__ import annotations
 
+import random
 import time
 from dataclasses import asdict, dataclass
 from typing import Any
@@ -56,6 +57,12 @@ def clamp_float(value: float, minimum: float, maximum: float) -> float:
 
 def clamp_int(value: int, minimum: int, maximum: int) -> int:
     return min(maximum, max(minimum, value))
+
+
+def normalize_level_range(min_level: int = 0, max_level: int = 100) -> tuple[int, int]:
+    low = clamp_int(int(min_level), 0, 100)
+    high = clamp_int(int(max_level), 0, 100)
+    return (low, high) if low <= high else (high, low)
 
 
 def auto_seq() -> int:
@@ -131,6 +138,47 @@ def describe_telescopic_frame(level: int, seq: int | None = None) -> dict[str, A
     frame["characteristic_uuid"] = CONTROL_WRITE_UUID
     frame["response"] = False
     return frame
+
+
+def describe_random_telescopic_frame(
+    min_level: int = 0,
+    max_level: int = 100,
+    seq: int | None = None,
+) -> dict[str, Any]:
+    low, high = normalize_level_range(min_level, max_level)
+    level = random.randint(low, high)
+    return {
+        "mode": "random",
+        "min_level": low,
+        "max_level": high,
+        "level": level,
+        "frame": describe_telescopic_frame(level, seq),
+    }
+
+
+def describe_random_telescopic_sequence(
+    count: int = 10,
+    min_level: int = 0,
+    max_level: int = 100,
+    interval_ms: int = 500,
+    seq: int | None = None,
+) -> dict[str, Any]:
+    low, high = normalize_level_range(min_level, max_level)
+    frame_count = clamp_int(int(count), 1, 1000)
+    interval = clamp_int(int(interval_ms), 50, 60000)
+    start_seq = auto_seq() if seq is None else normalize_byte(seq, "seq")
+    frames = [
+        describe_telescopic_frame(random.randint(low, high), (start_seq + index) & 0xFF)
+        for index in range(frame_count)
+    ]
+    return {
+        "mode": "random_sequence",
+        "count": frame_count,
+        "min_level": low,
+        "max_level": high,
+        "interval_ms": interval,
+        "frames": frames,
+    }
 
 
 def describe_heating_frame(on: bool, seq: int | None = None) -> dict[str, Any]:

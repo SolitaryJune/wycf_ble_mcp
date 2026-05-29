@@ -6,7 +6,7 @@ from mcp.server.fastmcp import FastMCP
 
 from . import bridge
 from .audio_level import read_system_volume
-from .ble import discover, notify_for, scan, write_raw
+from .ble import discover, notify_for, scan, write_raw, write_raw_sequence
 from .known import (
     CONFIRMED_CONTROL_COMMANDS,
     CONFIRMED_CONTROL_UUIDS,
@@ -31,6 +31,8 @@ from .protocol import (
     describe_heating_frame,
     describe_level_frame,
     describe_named_level_frame,
+    describe_random_telescopic_frame,
+    describe_random_telescopic_sequence,
     describe_telescopic_frame,
     map_audio_level,
 )
@@ -154,6 +156,28 @@ def build_telescopic_frame(level: int, seq: int | None = None) -> dict[str, Any]
 
 
 @mcp.tool()
+def build_random_telescopic_frame(
+    min_level: int = 0,
+    max_level: int = 100,
+    seq: int | None = None,
+) -> dict[str, Any]:
+    """Pick a random telescopic level in range and build one ffb7 frame."""
+    return describe_random_telescopic_frame(min_level, max_level, seq)
+
+
+@mcp.tool()
+def build_random_telescopic_sequence(
+    count: int = 10,
+    min_level: int = 0,
+    max_level: int = 100,
+    interval_ms: int = 500,
+    seq: int | None = None,
+) -> dict[str, Any]:
+    """Build a finite random telescopic frame sequence for auto mode."""
+    return describe_random_telescopic_sequence(count, min_level, max_level, interval_ms, seq)
+
+
+@mcp.tool()
 def build_heating_frame(on: bool, seq: int | None = None) -> dict[str, Any]:
     """Build a heating switch frame for UUID 0000ffb5."""
     return describe_heating_frame(on, seq)
@@ -209,6 +233,65 @@ async def set_telescopic_level(
         allow_ota=False,
     )
     result["frame"] = frame
+    return result
+
+
+@mcp.tool()
+async def set_random_telescopic_level(
+    address: str,
+    min_level: int = 0,
+    max_level: int = 100,
+    seq: int | None = None,
+    timeout: float = 20.0,
+) -> dict[str, Any]:
+    """Pick one random telescopic level and send it immediately."""
+    generated = describe_random_telescopic_frame(min_level, max_level, seq)
+    frame = generated["frame"]
+    result = await write_raw(
+        address=address,
+        characteristic_uuid=CONTROL_WRITE_UUID,
+        payload_hex=str(frame["payload_hex"]),
+        response=False,
+        timeout=timeout,
+        allow_ota=False,
+    )
+    result["random"] = generated
+    return result
+
+
+@mcp.tool()
+async def run_random_telescopic_sequence(
+    address: str,
+    count: int = 10,
+    min_level: int = 0,
+    max_level: int = 100,
+    interval_ms: int = 500,
+    stop_after: bool = True,
+    seq: int | None = None,
+    timeout: float = 20.0,
+) -> dict[str, Any]:
+    """Run a finite random auto-mode sequence over one BLE connection."""
+    sequence = describe_random_telescopic_sequence(count, min_level, max_level, interval_ms, seq)
+    frames = list(sequence["frames"])
+    stop_frame = None
+    if stop_after:
+        last_seq = int(frames[-1]["seq"]) if frames else 0
+        stop_frame = describe_telescopic_frame(0, (last_seq + 1) & 0xFF)
+        frames.append(stop_frame)
+
+    result = await write_raw_sequence(
+        address=address,
+        characteristic_uuid=CONTROL_WRITE_UUID,
+        payload_hexes=[str(frame["payload_hex"]) for frame in frames],
+        response=False,
+        timeout=timeout,
+        allow_ota=False,
+        interval_ms=int(sequence["interval_ms"]),
+    )
+    result["sequence"] = sequence
+    result["stop_after"] = bool(stop_after)
+    if stop_frame is not None:
+        result["stop_frame"] = stop_frame
     return result
 
 
