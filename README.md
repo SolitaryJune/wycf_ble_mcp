@@ -104,7 +104,7 @@ http://localhost:8000/web/index.html
 - 伸缩滑杆：`ffb7 + command_id 0x0c`
 - 加热开关：`ffb5 + command_id 0x05`
 - 自动随机模式：按配置间隔在最小/最大强度内随机发送伸缩强度
-- 音频联动：可选内置/外置麦克风，或浏览器支持时捕获屏幕/系统音频，按实时音量映射伸缩强度
+- 音频联动：可选内置/外置麦克风，或浏览器支持时捕获屏幕/系统音频，按实时音量映射伸缩强度；放大倍数支持 `-100x..100x`
 - 订阅 `ffb8` notify 并显示状态/ack
 - raw hex 发送和命令帧生成
 
@@ -195,7 +195,7 @@ cd /Users/a24
 
 - HTML 用 Web Audio 读取实时响度，支持内置/外置麦克风和 Chrome 支持的系统/标签页音频捕获。
 - MCP 的 `read_system_audio_volume` 读 OS 音量设置。
-- MCP 的 `map_audio_to_level` / `build_audio_level_frame` / `set_telescopic_from_audio_level` 支持阈值、增益、放大倍数 `multiplier` 和上限 `max_level`。
+- MCP 的 `map_audio_to_level` / `build_audio_level_frame` / `set_telescopic_from_audio_level` 支持阈值、增益、放大倍数 `multiplier` 和上限 `max_level`。`multiplier` 范围为 `-100..100`；负值表示反向映射：超过阈值后音量越大强度越低，低于阈值仍归零。
 
 ## 已确认静态信息
 

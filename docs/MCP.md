@@ -115,7 +115,7 @@ notify                    0000ffb8-0000-1000-8000-00805f9b34fb
 ### 音频映射
 
 - `map_audio_to_level(volume_percent, threshold_percent=1.0, gain=8.0, multiplier=1.0, max_level=100)`
-  - 将 `0..100` 音量/响度映射为伸缩强度。
+  - 将 `0..100` 音量/响度映射为伸缩强度。`multiplier` 支持 `-100..100`；负值表示反向映射：超过阈值后音量越大强度越低，低于阈值仍归零。
 - `build_audio_level_frame(volume_percent, threshold_percent=1.0, gain=8.0, multiplier=1.0, max_level=100, seq=None)`
   - 音量映射后构造伸缩帧。
 - `set_telescopic_from_audio_level(address, volume_percent, threshold_percent=1.0, gain=8.0, multiplier=1.0, max_level=100, seq=None, timeout=20.0)`
@@ -188,6 +188,18 @@ build_audio_level_frame(
   threshold_percent=1.0,
   gain=8.0,
   multiplier=100.0,
+  max_level=100
+)
+```
+
+### 按负倍数反向映射音量
+
+```text
+build_audio_level_frame(
+  volume_percent=3.0,
+  threshold_percent=1.0,
+  gain=8.0,
+  multiplier=-1.0,
   max_level=100
 )
 ```

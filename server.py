@@ -197,7 +197,7 @@ def map_audio_to_level(
     multiplier: float = 1.0,
     max_level: int = 100,
 ) -> dict[str, Any]:
-    """Map a 0..100 audio volume/amplitude value to a 0..100 telescopic level."""
+    """Map audio to level. Negative multiplier reverses mapping above threshold."""
     return map_audio_level(volume_percent, threshold_percent, gain, multiplier, max_level)
 
 

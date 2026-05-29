@@ -60,6 +60,16 @@ async def main() -> None:
                     "max_level": 100,
                 },
             )
+            mapped_negative = await session.call_tool(
+                "map_audio_to_level",
+                {
+                    "volume_percent": 3,
+                    "threshold_percent": 1,
+                    "gain": 8,
+                    "multiplier": -1,
+                    "max_level": 100,
+                },
+            )
             decoded = await session.call_tool("decode_control_notify", {"payload_hex": "010700030501fa"})
 
             print(
@@ -71,6 +81,7 @@ async def main() -> None:
                         "build_random_telescopic_frame": random_frame.content[0].text,
                         "build_random_telescopic_sequence": random_sequence.content[0].text,
                         "map_audio_to_level": mapped.content[0].text,
+                        "map_audio_to_level_negative": mapped_negative.content[0].text,
                         "decode_control_notify": decoded.content[0].text,
                     },
                     ensure_ascii=False,

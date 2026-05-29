@@ -356,7 +356,7 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("volume", type=float, help="0..100 volume/amplitude")
     p.add_argument("--threshold", type=float, default=1.0)
     p.add_argument("--gain", type=float, default=8.0)
-    p.add_argument("--multiplier", type=float, default=1.0)
+    p.add_argument("--multiplier", type=float, default=1.0, help="-100..100; negative reverses audio mapping")
     p.add_argument("--max-level", type=int, default=100)
     p.set_defaults(func=cmd_audio_map)
 
@@ -364,7 +364,7 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("volume", type=float)
     p.add_argument("--threshold", type=float, default=1.0)
     p.add_argument("--gain", type=float, default=8.0)
-    p.add_argument("--multiplier", type=float, default=1.0)
+    p.add_argument("--multiplier", type=float, default=1.0, help="-100..100; negative reverses audio mapping")
     p.add_argument("--max-level", type=int, default=100)
     p.add_argument("--seq", type=lambda x: int(x, 0), default=None)
     p.set_defaults(func=cmd_build_audio_level)

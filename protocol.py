@@ -48,6 +48,8 @@ class AudioLevelMapping:
     multiplier: float
     max_level: int
     normalized: float
+    raw_level: float
+    inverted: bool
     level: int
 
 
@@ -200,13 +202,19 @@ def map_audio_level(
     volume = clamp_float(float(volume_percent), 0.0, 100.0)
     threshold = clamp_float(float(threshold_percent), 0.0, 99.0)
     gain_value = clamp_float(float(gain), 0.0, 100.0)
-    multiplier_value = clamp_float(float(multiplier), 0.0, 100.0)
+    multiplier_value = clamp_float(float(multiplier), -100.0, 100.0)
     max_level_value = clamp_int(int(max_level), 0, 100)
     if volume <= threshold or max_level_value == 0:
         normalized = 0.0
+        raw_level = 0.0
+        level = 0
     else:
-        normalized = ((volume - threshold) / max(1.0, 100.0 - threshold)) * gain_value * multiplier_value
-    level = clamp_int(round(normalized * max_level_value), 0, 100)
+        normalized = ((volume - threshold) / max(1.0, 100.0 - threshold)) * gain_value * abs(multiplier_value)
+        raw_level = normalized * max_level_value
+        if multiplier_value < 0:
+            level = clamp_int(round(max_level_value - raw_level), 0, 100)
+        else:
+            level = clamp_int(round(raw_level), 0, 100)
     return asdict(
         AudioLevelMapping(
             volume_percent=volume,
@@ -215,6 +223,8 @@ def map_audio_level(
             multiplier=multiplier_value,
             max_level=max_level_value,
             normalized=normalized,
+            raw_level=raw_level,
+            inverted=multiplier_value < 0,
             level=level,
         )
     )
