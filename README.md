@@ -145,6 +145,13 @@ cd /Users/a24
 /Users/a24/ble_mcp/docs/MCP.md
 ```
 
+MCP 自检：
+
+```bash
+cd /Users/a24
+/Users/a24/ble_mcp/.venv/bin/python /Users/a24/ble_mcp/scripts/test_mcp.py
+```
+
 主要 tools：
 
 - `known_facts`

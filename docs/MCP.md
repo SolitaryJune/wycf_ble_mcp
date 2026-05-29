@@ -17,6 +17,15 @@ cd /Users/a24
 tryfun-ble-mcp-server
 ```
 
+## 自检
+
+```bash
+cd /Users/a24
+/Users/a24/ble_mcp/.venv/bin/python /Users/a24/ble_mcp/scripts/test_mcp.py
+```
+
+自检会启动 stdio MCP server，检查核心 tools 是否存在，并调用构帧、音频映射和 notify 解码工具。
+
 ## Codex / Claude MCP 配置示例
 
 ```json
