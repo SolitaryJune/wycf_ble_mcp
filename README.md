@@ -176,3 +176,11 @@ adb install -r tryfun-ble-log-signed.apk
 adb logcat | rg "TFBLEWrite|writeCharacteristic"
 python -m ble_mcp.cli parse-log --file log.txt
 ```
+
+## 友情链接
+
+[Linux do](https://linux.do))。
+
+## 许可证
+
+Business Source License
