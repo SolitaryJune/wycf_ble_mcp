@@ -243,7 +243,7 @@
           <label><input id="randomLogWrites" type="checkbox">记录每次发送</label>
           <label><input id="randomStopZero" type="checkbox" checked>停止时归零</label>
         </div>
-        <p class="hint">每个周期在最小/最大强度之间随机取一个整数并发送到 <code>ffb7</code>。启动随机模式会自动停止音频联动/模拟音量，避免多个模式抢写。</p>
+        <p class="hint">每个周期在最小/最大强度之间随机取一个整数并发送到 <code>ffb7</code>。可与音频联动并行运行，多个模式同时写入时命令会交错发送。</p>
       </div>
 
       <div class="card wide">
@@ -550,8 +550,9 @@
       $("audioDot").className = "dot " + (running ? "ok" : (mode === "rest" ? "warn" : ""));
       $("audioState").textContent = text;
       $("startAudioBtn").disabled = running;
-      $("restAudioBtn").disabled = !running;
-      $("stopAudioBtn").disabled = !running;
+      $("restAudioBtn").disabled = false;
+      $("restAudioBtn").textContent = mode === "rest" ? "继续" : "休息（停采集）";
+      $("stopAudioBtn").disabled = !running && mode !== "rest";
     }
 
     function setRandomState(running, text) {
@@ -596,7 +597,6 @@
       if (!telescopicChar) {
         throw new Error("请先连接 BLE");
       }
-      stopAudioReactive(false);
       stopRandomAuto(false);
       const interval = clamp(Number($("randomInterval").value) || 500, 80, 60000);
       setRandomState(true, "随机中");
@@ -623,7 +623,6 @@
 
     async function startAudioReactive() {
       stopAudioReactive(false);
-      stopRandomAuto(false);
       if (!navigator.mediaDevices) {
         throw new Error("当前浏览器不支持 mediaDevices");
       }
@@ -686,9 +685,30 @@
     }
 
     function restAudioReactive() {
+      if (!audioAnalyser) return;
+      if (audioAnimation) {
+        cancelAnimationFrame(audioAnimation);
+        audioAnimation = 0;
+      }
       const text = telescopicChar ? "休息中，BLE保持连接" : "休息中，未连接 BLE";
-      stopAudioReactive(true, text, "rest");
-      log("audio rest", "media capture stopped, BLE kept connected");
+      $("audioMeterBar").style.width = "0%";
+      $("audioVolume").textContent = "0%";
+      $("audioTarget").textContent = "0";
+      setAudioState(false, text, "rest");
+      if ($("audioStopZero").checked && telescopicChar) {
+        setTelescopic(0, { label: "audio-rest" }).catch((err) => log("rest stop error", err.message));
+      }
+      log("audio rest", "采集暂停，音频连接保持");
+    }
+
+    function resumeAudioReactive() {
+      if (!audioAnalyser) return;
+      resetAudioAnalysisState();
+      audioLastSendAt = 0;
+      audioLastSentLevel = -1;
+      setAudioState(true, "联动中");
+      log("audio resumed");
+      analyzeAudio();
     }
 
     function readNumber(id, fallback) {
@@ -992,7 +1012,6 @@
         return;
       }
 
-      stopRandomAuto(false);
       let step = 0;
       setAudioState(true, telescopicChar ? "模拟发送中" : "模拟显示，未连接 BLE");
       log("test pulse started");
@@ -1018,7 +1037,13 @@
         stopAudioReactive(false);
         log("audio start error", err.message);
       }));
-      $("restAudioBtn").addEventListener("click", () => restAudioReactive());
+      $("restAudioBtn").addEventListener("click", () => {
+        if (audioAnimation) {
+          restAudioReactive();
+        } else if (audioAnalyser) {
+          resumeAudioReactive();
+        }
+      });
       $("stopAudioBtn").addEventListener("click", () => stopAudioReactive(true));
       $("testPulseBtn").addEventListener("click", () => startTestPulse());
       $("startRandomBtn").addEventListener("click", () => {

@@ -1,251 +1,178 @@
-# TryFun CTF BLE/MCP 本地控制器
+# TryFun BLE 本地控制器
 
-目标：不依赖官方 App，直接通过本机 BLE 与玩具 GATT 交互，并提供 MCP tools 让 Codex/Claude 调用。
+不依赖官方 App，通过浏览器或 AI 助手直接控制 TryFun 玩具。
 
-当前状态：
+## 它能做什么
 
-- 已静态确认 Unity 侧 `TFGTC.dll` 通过 `tfgtc://...` 桥接命令调用 Flutter/Dart。
-- 已静态提取产品 ID、状态字段、OTA UUID、普通控制 UUID 候选。
-- 已动态确认 Black Hole Max 伸缩控制：`ffac` service、`ffb7` write、`ffb8` notify。
-- macOS 本机已通过独立 `artifacts/BleMcpPython.app` 绕过 Homebrew shell Python 的 Bluetooth TCC 崩溃。
-- 当前实测目标：`TF-BHMAX`，macOS CoreBluetooth UUID `32D7BA9B-008B-6312-B4D6-0A6FAA6B26D0`。
-- 已封装 `telescopic` / `heating` / `set-level` / MCP tools，并新增单文件 Web Bluetooth 控制台。
+- **手动控制** — 滑杆拖动伸缩强度 0-100%，加热开关
+- **自动随机模式** — 设定范围和间隔，自动随机发送强度变化
+- **音频联动** — 麦克风或屏幕音频实时驱动伸缩，支持鼓点律动和音量包络两种模式
+- **多模式并行** — 音频联动、自动随机、手动控制可同时运行
+- **MCP 接入** — Claude / Codex 等 AI 助手可通过 MCP 协议直接控制设备
 
-## 安装依赖
+## 支持设备
 
-```bash
-cd /Users/a24
-python -m pip install -r /Users/a24/ble_mcp/requirements.txt
-```
+已实测：**Black Hole Max** (`TF-BHMAX`)
 
-## CLI 用法
+协议逆向自官方 App，理论上支持所有使用相同 GATT 协议的 TryFun 产品线（Black Hole 系列、吮吸系列、震动蛋系列等）。
 
-打印 APK/DLL 静态结论：
+## 快速开始
 
-```bash
-python -m ble_mcp.cli known
-```
-
-扫描疑似 TryFun 设备：
-
-```bash
-python -m ble_mcp.cli scan --duration 8
-```
-
-发现 GATT：
-
-```bash
-python -m ble_mcp.cli discover "32D7BA9B-008B-6312-B4D6-0A6FAA6B26D0"
-```
-
-订阅通知：
-
-```bash
-python -m ble_mcp.cli notify "32D7BA9B-008B-6312-B4D6-0A6FAA6B26D0" 0000ffb8-0000-1000-8000-00805f9b34fb --seconds 10
-```
-
-写入已确认 payload：
-
-```bash
-python -m ble_mcp.cli write "32D7BA9B-008B-6312-B4D6-0A6FAA6B26D0" 0000ffb7-0000-1000-8000-00805f9b34fb "01020304"
-```
-
-默认拒绝写 OTA 特征 `0000ae01-...`；只有明确需要固件升级通道时才加 `--allow-ota`。
-
-设置 Black Hole Max 伸缩强度：
-
-```bash
-python -m ble_mcp.cli build-level 0x0c 74 --seq 8
-python -m ble_mcp.cli telescopic "32D7BA9B-008B-6312-B4D6-0A6FAA6B26D0" 74
-python -m ble_mcp.cli telescopic "32D7BA9B-008B-6312-B4D6-0A6FAA6B26D0" 0
-```
-
-随机自动模式：
-
-```bash
-python -m ble_mcp.cli build-random --min-level 10 --max-level 90
-python -m ble_mcp.cli random "32D7BA9B-008B-6312-B4D6-0A6FAA6B26D0" --min-level 10 --max-level 90
-python -m ble_mcp.cli random-loop "32D7BA9B-008B-6312-B4D6-0A6FAA6B26D0" --count 20 --interval-ms 500 --min-level 10 --max-level 90 --stop-after
-```
-
-开关加热：
-
-```bash
-python -m ble_mcp.cli heating "32D7BA9B-008B-6312-B4D6-0A6FAA6B26D0" --on
-python -m ble_mcp.cli heating "32D7BA9B-008B-6312-B4D6-0A6FAA6B26D0" --off
-```
-
-注意：Android 日志里的 `5C:65:E7:3A:9E:D6` 是手机看到的 BLE MAC；macOS/ CoreBluetooth 要使用扫描得到的 UUID。
-
-## 单文件 HTML 控制台
-
-文件：
-
-```text
-/Users/a24/ble_mcp/web/index.html
-```
-
-启动本地静态服务后用 Chrome/Edge 打开：
+### Web 控制台（推荐）
 
 ```bash
 cd /Users/a24/ble_mcp
 python3 -m http.server 8000
 ```
 
-然后访问：
+用 Chrome/Edge 打开 `http://localhost:8000/web/index.html`，点击"连接 TF-BHMAX"即可。
 
-```text
-http://localhost:8000/web/index.html
+### MCP（AI 助手接入）
+
+在 MCP 配置中添加：
+
+```json
+{
+  "mcpServers": {
+    "tryfun-ble": {
+      "command": "/Users/a24/ble_mcp/.venv/bin/python",
+      "args": ["-m", "ble_mcp.server"],
+      "cwd": "/Users/a24"
+    }
+  }
+}
 ```
 
-页面功能：
+AI 助手即可通过自然语言控制设备，例如"把伸缩强度设到 50"、"开启加热"、"开始音频联动"。
 
-- Web Bluetooth 连接 `TF-BHMAX`
-- 伸缩滑杆：`ffb7 + command_id 0x0c`
-- 加热开关：`ffb5 + command_id 0x05`
-- 自动随机模式：按配置间隔在最小/最大强度内随机发送伸缩强度
-- 音频联动：可选内置/外置麦克风，或浏览器支持时捕获屏幕/系统音频，按实时音量映射伸缩强度；放大倍数支持 `-100x..100x`；“休息”会停止声音读取但保持 BLE 连接
-- 订阅 `ffb8` notify 并显示状态/ack
-- raw hex 发送和命令帧生成
-
-读取当前系统音量设置：
+### CLI
 
 ```bash
-python -m ble_mcp.cli system-volume
+# 扫描设备
+python -m ble_mcp.cli scan --duration 8
+
+# 设置伸缩强度
+python -m ble_mcp.cli telescopic "设备UUID" 50
+
+# 加热开关
+python -m ble_mcp.cli heating "设备UUID" --on
+python -m ble_mcp.cli heating "设备UUID" --off
+
+# 随机自动模式
+python -m ble_mcp.cli random-loop "设备UUID" --count 20 --interval-ms 500 --min-level 10 --max-level 90
 ```
 
-这个 CLI/MCP 工具读的是当前系统音量设置；真正“随着声音变化”的实时响度检测在 HTML 页面里完成。
+## 控制模式
 
-## 解析 patched APK 日志
+### 手动控制
 
-已存在日志补丁 APK：
+拖动滑杆设定伸缩强度，支持"拖动实时发送"开关。加热独立控制。
+
+### 自动随机模式
+
+设定最小/最大强度和发送间隔，系统在范围内随机取值并持续发送。适合解放双手。
+
+### 音频联动
+
+将声音实时转化为伸缩动作。两种驱动方式：
+
+**律动/节拍模式**（默认，推荐）
+- 只用 70-260Hz 鼓点突增触发，输出短脉冲
+- 人声（300-3400Hz）只参与抑制，不会触发
+- 自适应底噪门，过滤持续环境声
+- 适合音乐节拍跟随
+
+**音量包络模式**
+- 按整体响度映射强度
+- 关闭所有过滤后等同原始响度模式
+- 适合语音/环境声驱动
+
+音频来源可选：
+- 内置/外置麦克风
+- 屏幕/系统音频捕获（Chrome 支持）
+
+**参数实时可调**：阈值、增益、放大倍数、上限等参数在联动运行时修改即时生效，无需重启。
+
+**休息模式**：暂停音频采集但保持 BLE 连接，点击"继续"恢复，不需重新选择音频设备。
+
+**放大倍数**：支持 `-100x..100x`。负值表示反向映射 — 声音越大强度越低。
+
+## 多模式并行
+
+所有控制模式互不排斥：
+
+- 开启音频联动后，仍可启动自动随机模式
+- 手动拖动滑杆随时可用
+- 多个模式同时写入时命令交错发送到设备
+
+## MCP 工具列表
+
+| 工具 | 说明 |
+|------|------|
+| `scan_devices` | 扫描 BLE 设备 |
+| `discover_gatt` | 连接并列出 GATT 特征 |
+| `set_telescopic_level` | 设置伸缩强度 |
+| `stop_telescopic` | 伸缩归零 |
+| `set_heating` | 加热开关 |
+| `emergency_stop` | 紧急停止（可选关闭加热） |
+| `run_random_telescopic_sequence` | 运行随机自动模式 |
+| `set_telescopic_from_audio_level` | 音量映射并发送 |
+| `set_telescopic_from_audio_beat` | 鼓点映射并发送 |
+| `build_*_frame` | 构造协议帧（不发送） |
+| `decode_control_notify` | 解码设备状态通知 |
+| `write_raw_hex` | 写入原始 hex |
+| `known_facts` | 查看已知协议信息 |
+
+完整 MCP 文档见 `docs/MCP.md`。
+
+## 安装
 
 ```bash
-adb install -r /path/to/tryfun-ble-log-signed.apk
+pip install -r requirements.txt
+```
+
+依赖：`bleak`（BLE）、`mcp`（MCP server）。
+
+## 技术细节
+
+### BLE 协议
+
+```
+Service:    0000ffac-0000-1000-8000-00805f9b34fb
+伸缩写入:    0000ffb7 (write without response)
+加热写入:    0000ffb5 (write with response)
+状态通知:    0000ffb8 (notify)
+```
+
+伸缩帧格式：`[seq, 0x02, 0x00, 0x03, 0x0c, level, checksum]`
+
+加热帧格式：`[seq, 0x02, 0x00, 0x03, 0x05, 1/0, checksum]`
+
+### macOS 注意事项
+
+- macOS 使用 CoreBluetooth UUID（如 `32D7BA9B-...`），不是 Android 的 BLE MAC
+- 代码自动通过 `BleMcpPython.app` 绕过 shell Python 的 Bluetooth TCC 限制
+
+### 项目结构
+
+```
+ble_mcp/
+  server.py          # MCP server
+  protocol.py        # 协议帧构建和音频映射
+  ble.py             # BLE 通信层
+  cli.py             # 命令行工具
+  known.py           # 静态提取的产品/UUID 信息
+  audio_level.py     # OS 音量读取
+  web/index.html     # 单文件 Web 控制台
+  docs/MCP.md        # MCP 完整文档
+```
+
+## 解析 APK 日志
+
+如需为其他产品确认协议，可用 patched APK 抓取 BLE 写入日志：
+
+```bash
+adb install -r tryfun-ble-log-signed.apk
 adb logcat | rg "TFBLEWrite|writeCharacteristic"
+python -m ble_mcp.cli parse-log --file log.txt
 ```
-
-把日志保存后解析：
-
-```bash
-python -m ble_mcp.cli parse-log --file /Users/a24/ble_mcp/artifacts/tfble_write_20260529.log
-```
-
-需要从日志中拿到这三个字段：
-
-- `service_uuid`
-- `characteristic_uuid`
-- `payload_hex`
-
-拿到以后即可用本工具 raw write 复现，再封装 `set_vibration` / `set_telescopic` / `set_rotation` / `stop`。
-
-## MCP server
-
-MCP stdio 启动命令：
-
-```bash
-cd /Users/a24
-/Users/a24/ble_mcp/.venv/bin/python -m ble_mcp.server
-```
-
-完整 MCP 文档见：
-
-```text
-/Users/a24/ble_mcp/docs/MCP.md
-```
-
-MCP 自检：
-
-```bash
-cd /Users/a24
-/Users/a24/ble_mcp/.venv/bin/python /Users/a24/ble_mcp/scripts/test_mcp.py
-```
-
-主要 tools：
-
-- `known_facts`
-- `read_system_audio_volume`
-- `controller_profile`
-- `scan_devices`
-- `discover_gatt`
-- `write_raw_hex`
-- `collect_notifications`
-- `parse_tfblewrite_log`
-- `build_control_level_frame`
-- `build_named_control_frame`
-- `build_telescopic_frame`
-- `build_random_telescopic_frame`
-- `build_random_telescopic_sequence`
-- `build_heating_frame`
-- `decode_control_notify`
-- `map_audio_to_level`
-- `build_audio_level_frame`
-- `reset_audio_beat_state`
-- `map_audio_beat_to_level`
-- `build_audio_beat_frame`
-- `set_telescopic_level`
-- `set_random_telescopic_level`
-- `run_random_telescopic_sequence`
-- `stop_telescopic`
-- `set_heating`
-- `set_control_level`
-- `emergency_stop`
-- `set_telescopic_from_audio_level`
-- `set_telescopic_from_audio_beat`
-- `set_telescopic_from_system_volume`
-- `build_tfgtc_bridge_command`
-
-音频相关说明：
-
-- HTML 用 Web Audio 读取实时音频，支持内置/外置麦克风和 Chrome 支持的系统/标签页音频捕获。
-- Web 控制台默认使用“律动/节拍 + 只认鼓点/低频”：只用约 `70-260Hz` 的鼓点突增触发，输出短脉冲；切回“音量包络”并关闭过滤可恢复原始响度模式。
-- Web 控制台支持“过滤人声频段”和“过滤底噪/杂音”：人声过滤会压低约 `300-3400Hz`，并在人声能量主导时抑制触发；底噪/杂音过滤会忽略低频轰鸣、高频嘶声并启用自适应噪声门。
-- MCP 的 `read_system_audio_volume` 读 OS 音量设置。
-- MCP 的 `map_audio_to_level` / `build_audio_level_frame` / `set_telescopic_from_audio_level` 支持响度映射。
-- MCP 的 `reset_audio_beat_state` / `map_audio_beat_to_level` / `build_audio_beat_frame` / `set_telescopic_from_audio_beat` 支持和 Web 控制台一致的状态化鼓点映射：调用方传入低频鼓点能量/通量和人声能量，MCP 维护噪声门、通量历史、释放包络并输出短脉冲 level。
-- 音频映射均支持阈值、增益、放大倍数 `multiplier` 和上限 `max_level`。`multiplier` 范围为 `-100..100`；负值表示反向映射：超过阈值后音量/鼓点越大强度越低，低于阈值仍归零。
-
-## 已确认静态信息
-
-### OTA UUID
-
-- Service: `0000ae00-0000-1000-8000-00805f9b34fb`
-- Write: `0000ae01-0000-1000-8000-00805f9b34fb`
-- Notify: `0000ae02-0000-1000-8000-00805f9b34fb`
-
-### 普通控制 UUID 候选
-
-来自 `E:\Code\wycf\apktool_out\lib\arm64-v8a\libapp.so`：
-
-- `0000ff00-0000-1000-8000-00805f9b34fb`
-- `0000ff01-0000-1000-8000-00805f9b34fb`
-- `0000ff10-0000-1000-8000-00805f9b34fb`
-- `0000ff12-0000-1000-8000-00805f9b34fb`
-- `0000ff14-0000-1000-8000-00805f9b34fb`
-- `0000ffac-0000-1000-8000-00805f9b34fb`
-- `0000ffb4-0000-1000-8000-00805f9b34fb`
-- `0000ffb5-0000-1000-8000-00805f9b34fb`
-- `0000ffb7-0000-1000-8000-00805f9b34fb`
-- `0000ffb8-0000-1000-8000-00805f9b34fb`
-- `0000fff1-0000-1000-8000-00805f9b34fb`
-
-### Unity TFGTC 桥接命令
-
-这些不是 BLE 帧，而是 Unity -> Flutter 的高级命令：
-
-- `tfgtc://create_session`
-- `tfgtc://disconnect?id={session_id}`
-- `tfgtc://reconnect?id={session_id}`
-- `tfgtc://change_heartbeat_period?id={session_id}&period={seconds}`
-- `tfgtc://stop?id={session_id}&with_response={True|False}`
-- `tfgtc://pause?id={session_id}`
-- `tfgtc://resume?id={session_id}`
-- `tfgtc://execute?id={session_id}&with_response={True|False}&commands={cmd1|cmd2}`
-- `tfgtc://get_accessory_id?id={session_id}`
-- `tfgtc://get_score_calculation_req_data?id={session_id}&complete={True|False}`
-- `tfgtc://get_state?id={session_id}`
-- `tfgtc://select_product_to_play_with?id={session_id}&connected_product_id={product_id}&limited_product_ids={id1|id2}`
-
-## 产品 ID
-
-见 `ble_mcp/known.py`。这些来自 `E:\Code\wycf\extracted_yoo_dlls\TFConstant.dll` 的 enum description。
