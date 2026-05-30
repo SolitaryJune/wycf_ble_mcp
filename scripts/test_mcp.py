@@ -31,6 +31,9 @@ async def main() -> None:
                 "build_random_telescopic_frame",
                 "build_random_telescopic_sequence",
                 "map_audio_to_level",
+                "reset_audio_beat_state",
+                "map_audio_beat_to_level",
+                "build_audio_beat_frame",
                 "build_audio_level_frame",
                 "decode_control_notify",
                 "set_heating",
@@ -71,6 +74,26 @@ async def main() -> None:
                 },
             )
             decoded = await session.call_tool("decode_control_notify", {"payload_hex": "010700030501fa"})
+            await session.call_tool("reset_audio_beat_state", {"stream_id": "test"})
+            beat_mapped = await session.call_tool(
+                "map_audio_beat_to_level",
+                {
+                    "stream_id": "test",
+                    "low_beat_energy_percent": 20,
+                    "low_beat_flux_percent": 8,
+                    "voice_energy_percent": 1,
+                },
+            )
+            beat_frame = await session.call_tool(
+                "build_audio_beat_frame",
+                {
+                    "stream_id": "test-frame",
+                    "low_beat_energy_percent": 20,
+                    "low_beat_flux_percent": 8,
+                    "voice_energy_percent": 1,
+                    "seq": 4,
+                },
+            )
 
             print(
                 json.dumps(
@@ -82,6 +105,8 @@ async def main() -> None:
                         "build_random_telescopic_sequence": random_sequence.content[0].text,
                         "map_audio_to_level": mapped.content[0].text,
                         "map_audio_to_level_negative": mapped_negative.content[0].text,
+                        "map_audio_beat_to_level": beat_mapped.content[0].text,
+                        "build_audio_beat_frame": beat_frame.content[0].text,
                         "decode_control_notify": decoded.content[0].text,
                     },
                     ensure_ascii=False,

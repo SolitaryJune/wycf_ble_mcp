@@ -22,10 +22,12 @@ from .log_parser import parse_write_text
 from .protocol import (
     CONTROL_WRITE_UUID,
     CONTROL_WRITE_WITH_RESPONSE_UUID,
+    AudioBeatReactiveState,
     COMMAND_HEATING_SWITCH,
     COMMAND_TELESCOPIC_LEVEL,
     CONTROL_NOTIFY_UUID,
     CONTROL_SERVICE_UUID,
+    describe_audio_beat_frame,
     decode_control_notification,
     describe_audio_level_frame,
     describe_heating_frame,
@@ -34,6 +36,7 @@ from .protocol import (
     describe_random_telescopic_frame,
     describe_random_telescopic_sequence,
     describe_telescopic_frame,
+    map_audio_beat_level,
     map_audio_level,
 )
 
@@ -45,6 +48,16 @@ mcp = FastMCP(
         "then write raw confirmed payloads. Do not write OTA UUIDs unless explicitly allowed."
     ),
 )
+
+
+_AUDIO_BEAT_STATES: dict[str, AudioBeatReactiveState] = {}
+
+
+def _audio_beat_state(stream_id: str) -> AudioBeatReactiveState:
+    key = stream_id.strip() or "default"
+    if key not in _AUDIO_BEAT_STATES:
+        _AUDIO_BEAT_STATES[key] = AudioBeatReactiveState()
+    return _AUDIO_BEAT_STATES[key]
 
 
 @mcp.tool()
@@ -215,6 +228,107 @@ def build_audio_level_frame(
 
 
 @mcp.tool()
+def reset_audio_beat_state(stream_id: str = "default") -> dict[str, Any]:
+    """Reset one MCP audio beat/drum reactive stream state."""
+    key = stream_id.strip() or "default"
+    _AUDIO_BEAT_STATES[key] = AudioBeatReactiveState()
+    return {"stream_id": key, "state": _AUDIO_BEAT_STATES[key].__dict__ | {"flux_history": []}}
+
+
+@mcp.tool()
+def map_audio_beat_to_level(
+    low_beat_energy_percent: float,
+    low_beat_flux_percent: float,
+    voice_energy_percent: float = 0.0,
+    beat_energy_percent: float | None = None,
+    beat_flux_percent: float | None = None,
+    elapsed_ms: float = 16.7,
+    threshold_percent: float = 1.0,
+    gain: float = 8.0,
+    multiplier: float = 1.0,
+    max_level: int = 100,
+    filter_voice: bool = True,
+    filter_noise: bool = True,
+    drum_only: bool = True,
+    beat_sensitivity: float = 0.8,
+    beat_release_ms: float = 80.0,
+    stream_id: str = "default",
+) -> dict[str, Any]:
+    """Map supplied beat/drum audio features to level using a stateful stream.
+
+    Feature percentages are expected from an external analyzer. Defaults match
+    the Web controller: drum-only 70..260Hz trigger, 300..3400Hz voice suppression.
+    """
+    key = stream_id.strip() or "default"
+    state = _audio_beat_state(key)
+    mapping = map_audio_beat_level(
+        state,
+        low_beat_energy_percent,
+        low_beat_flux_percent,
+        voice_energy_percent,
+        beat_energy_percent,
+        beat_flux_percent,
+        elapsed_ms,
+        threshold_percent,
+        gain,
+        multiplier,
+        max_level,
+        filter_voice,
+        filter_noise,
+        drum_only,
+        beat_sensitivity,
+        beat_release_ms,
+    )
+    mapping["stream_id"] = key
+    return mapping
+
+
+@mcp.tool()
+def build_audio_beat_frame(
+    low_beat_energy_percent: float,
+    low_beat_flux_percent: float,
+    voice_energy_percent: float = 0.0,
+    beat_energy_percent: float | None = None,
+    beat_flux_percent: float | None = None,
+    elapsed_ms: float = 16.7,
+    threshold_percent: float = 1.0,
+    gain: float = 8.0,
+    multiplier: float = 1.0,
+    max_level: int = 100,
+    filter_voice: bool = True,
+    filter_noise: bool = True,
+    drum_only: bool = True,
+    beat_sensitivity: float = 0.8,
+    beat_release_ms: float = 80.0,
+    stream_id: str = "default",
+    seq: int | None = None,
+) -> dict[str, Any]:
+    """Map beat/drum audio features and build the corresponding ffb7 frame."""
+    key = stream_id.strip() or "default"
+    result = describe_audio_beat_frame(
+        _audio_beat_state(key),
+        low_beat_energy_percent,
+        low_beat_flux_percent,
+        voice_energy_percent,
+        beat_energy_percent,
+        beat_flux_percent,
+        elapsed_ms,
+        threshold_percent,
+        gain,
+        multiplier,
+        max_level,
+        filter_voice,
+        filter_noise,
+        drum_only,
+        beat_sensitivity,
+        beat_release_ms,
+        seq,
+    )
+    result["mapping"]["stream_id"] = key
+    return result
+
+
+@mcp.tool()
 async def set_telescopic_level(
     address: str,
     level: int,
@@ -381,6 +495,60 @@ async def set_telescopic_from_audio_level(
         allow_ota=False,
     )
     result.update(mapped)
+    return result
+
+
+@mcp.tool()
+async def set_telescopic_from_audio_beat(
+    address: str,
+    low_beat_energy_percent: float,
+    low_beat_flux_percent: float,
+    voice_energy_percent: float = 0.0,
+    beat_energy_percent: float | None = None,
+    beat_flux_percent: float | None = None,
+    elapsed_ms: float = 16.7,
+    threshold_percent: float = 1.0,
+    gain: float = 8.0,
+    multiplier: float = 1.0,
+    max_level: int = 100,
+    filter_voice: bool = True,
+    filter_noise: bool = True,
+    drum_only: bool = True,
+    beat_sensitivity: float = 0.8,
+    beat_release_ms: float = 80.0,
+    stream_id: str = "default",
+    seq: int | None = None,
+    timeout: float = 20.0,
+) -> dict[str, Any]:
+    """Map beat/drum audio features through one stateful stream and send the ffb7 frame."""
+    built = build_audio_beat_frame(
+        low_beat_energy_percent=low_beat_energy_percent,
+        low_beat_flux_percent=low_beat_flux_percent,
+        voice_energy_percent=voice_energy_percent,
+        beat_energy_percent=beat_energy_percent,
+        beat_flux_percent=beat_flux_percent,
+        elapsed_ms=elapsed_ms,
+        threshold_percent=threshold_percent,
+        gain=gain,
+        multiplier=multiplier,
+        max_level=max_level,
+        filter_voice=filter_voice,
+        filter_noise=filter_noise,
+        drum_only=drum_only,
+        beat_sensitivity=beat_sensitivity,
+        beat_release_ms=beat_release_ms,
+        stream_id=stream_id,
+        seq=seq,
+    )
+    result = await write_raw(
+        address=address,
+        characteristic_uuid=CONTROL_WRITE_UUID,
+        payload_hex=str(built["frame"]["payload_hex"]),
+        response=False,
+        timeout=timeout,
+        allow_ota=False,
+    )
+    result.update(built)
     return result
 
 

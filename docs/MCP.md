@@ -118,8 +118,16 @@ notify                    0000ffb8-0000-1000-8000-00805f9b34fb
   - 将 `0..100` 音量/响度映射为伸缩强度。`multiplier` 支持 `-100..100`；负值表示反向映射：超过阈值后音量越大强度越低，低于阈值仍归零。
 - `build_audio_level_frame(volume_percent, threshold_percent=1.0, gain=8.0, multiplier=1.0, max_level=100, seq=None)`
   - 音量映射后构造伸缩帧。
+- `reset_audio_beat_state(stream_id="default")`
+  - 重置一条 MCP 音频节拍流的历史状态。
+- `map_audio_beat_to_level(low_beat_energy_percent, low_beat_flux_percent, voice_energy_percent=0.0, ..., stream_id="default")`
+  - 状态化鼓点映射。默认只用约 `70-260Hz` 的低频鼓点能量/通量触发，`300-3400Hz` 人声能量只参与抑制，不参与触发。
+- `build_audio_beat_frame(low_beat_energy_percent, low_beat_flux_percent, voice_energy_percent=0.0, ..., stream_id="default", seq=None)`
+  - 鼓点映射后构造伸缩帧。
 - `set_telescopic_from_audio_level(address, volume_percent, threshold_percent=1.0, gain=8.0, multiplier=1.0, max_level=100, seq=None, timeout=20.0)`
   - 传入音量值，映射并直接发 BLE。
+- `set_telescopic_from_audio_beat(address, low_beat_energy_percent, low_beat_flux_percent, voice_energy_percent=0.0, ..., stream_id="default", seq=None, timeout=20.0)`
+  - 传入外部音频分析得到的鼓点特征，按状态化鼓点逻辑映射并直接发 BLE。
 - `set_telescopic_from_system_volume(address, source="output_volume", threshold_percent=1.0, gain=8.0, multiplier=1.0, max_level=100, seq=None, timeout=20.0)`
   - 读取 OS 音量设置，再映射发送。`source` 常用 `output_volume` 或 `input_volume`。
 

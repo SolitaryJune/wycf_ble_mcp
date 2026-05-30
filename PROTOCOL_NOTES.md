@@ -168,10 +168,11 @@ HTML 还包含音频联动模式：
 
 - 麦克风输入：通过 `enumerateDevices()` 选择内置/外置 `audioinput`。
 - 屏幕/系统音频：通过 `getDisplayMedia({ audio: true })` 捕获，是否能取到系统声取决于浏览器和系统权限。
-- 音频算法：Web Audio `AnalyserNode` 同时读取 time-domain PCM 和频谱。默认“律动/节拍”模式用加权频段的谱通量检测拍点，只在明显律动时触发；“音量包络”模式仍可按响度映射到 `0..100` 伸缩强度，关闭过滤后等同原始响度模式。
-- 过滤选项：人声过滤压低约 `300-3400Hz`；底噪/杂音过滤忽略低频轰鸣、高频嘶声，并用自适应噪声门减少持续环境声触发。
+- 音频算法：Web Audio `AnalyserNode` 同时读取 time-domain PCM 和频谱。默认“律动/节拍 + 只认鼓点/低频”模式只用约 `70-260Hz` 的鼓点突增计算谱通量并输出短脉冲；“音量包络”模式仍可按响度映射到 `0..100` 伸缩强度，关闭过滤后等同原始响度模式。
+- 过滤选项：人声过滤压低约 `300-3400Hz`，并在人声能量主导时抑制触发；底噪/杂音过滤忽略低频轰鸣、高频嘶声，并用自适应噪声门减少持续环境声触发。
 
 MCP/CLI 的 `read_system_audio_volume` / `system-volume` 读取的是 OS 音量设置，不是实时响度；实时联动优先用 HTML。
+MCP 另有状态化鼓点工具：`reset_audio_beat_state`、`map_audio_beat_to_level`、`build_audio_beat_frame`、`set_telescopic_from_audio_beat`。调用方传入外部分析得到的低频鼓点能量/通量和人声能量，MCP 维护噪声门、通量历史、释放包络并输出短脉冲 level。
 
 ## 仍缺的关键证据
 

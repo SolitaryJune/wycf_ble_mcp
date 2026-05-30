@@ -275,8 +275,9 @@
           </label>
           <label><input id="audioFilterVoice" type="checkbox" checked>过滤人声频段</label>
           <label><input id="audioFilterNoise" type="checkbox" checked>过滤底噪/杂音</label>
-          <label>节拍灵敏度 <input id="audioBeatSensitivity" type="number" min="0.5" max="4" step="0.1" value="1.4"></label>
-          <label>释放ms <input id="audioBeatRelease" type="number" min="60" max="800" value="180"></label>
+          <label><input id="audioDrumOnly" type="checkbox" checked>只认鼓点/低频</label>
+          <label>节拍灵敏度 <input id="audioBeatSensitivity" type="number" min="0.5" max="4" step="0.1" value="0.8"></label>
+          <label>释放ms <input id="audioBeatRelease" type="number" min="60" max="800" value="80"></label>
         </div>
         <div class="row">
           <label>阈值 <input id="audioThreshold" type="number" min="0" max="90" value="1"></label>
@@ -288,7 +289,7 @@
           <label><input id="audioLogWrites" type="checkbox">记录每次发送</label>
           <label><input id="audioStopZero" type="checkbox" checked>停止时归零</label>
         </div>
-        <p class="hint">默认“律动/节拍”用频谱突增检测鼓点/拍点，只在明显律动时触发；切到“音量包络”并关闭过滤，可恢复原来一有声音就按响度动的模式。人声过滤会压低约 300-3400Hz，底噪/杂音过滤会忽略低频轰鸣、高频嘶声并启用自适应噪声门。</p>
+        <p class="hint">默认“律动/节拍 + 只认鼓点/低频”只用约 70-260Hz 的鼓点突增触发，300-3400Hz 人声只会参与抑制，不会参与触发。切到“音量包络”并关闭过滤，可恢复原来一有声音就按响度动的模式。</p>
       </div>
 
       <div class="card wide">
@@ -323,6 +324,13 @@
 
     const COMMAND_TELESCOPIC = 0x0c;
     const COMMAND_HEATING = 0x05;
+    const AUDIO_BEAT_BANDS = [
+      { low: 70, high: 170, weight: 2.2 },
+      { low: 170, high: 260, weight: 1.8 },
+      { low: 260, high: 520, weight: 0.95 },
+      { low: 520, high: 1800, weight: 0.65 },
+      { low: 1800, high: 5000, weight: 0.35 },
+    ];
 
     let device = null;
     let server = null;
@@ -337,7 +345,7 @@
     let audioAnalyser = null;
     let audioData = null;
     let audioFrequencyData = null;
-    let audioPreviousSpectrum = null;
+    let audioPreviousBands = new Float32Array(AUDIO_BEAT_BANDS.length);
     let audioAnimation = 0;
     let audioLastSendAt = 0;
     let audioLastSentLevel = -1;
@@ -640,7 +648,6 @@
       audioAnalyser.smoothingTimeConstant = 0.12;
       audioData = new Uint8Array(audioAnalyser.fftSize);
       audioFrequencyData = new Uint8Array(audioAnalyser.frequencyBinCount);
-      audioPreviousSpectrum = new Float32Array(audioAnalyser.frequencyBinCount);
       audioContext.createMediaStreamSource(audioStream).connect(audioAnalyser);
       resetAudioAnalysisState();
       audioLastSendAt = 0;
@@ -664,7 +671,6 @@
       audioAnalyser = null;
       audioData = null;
       audioFrequencyData = null;
-      audioPreviousSpectrum = null;
       resetAudioAnalysisState();
       if (audioContext) {
         audioContext.close().catch(() => {});
@@ -696,7 +702,7 @@
       audioNoiseFloor = 0;
       audioLastAnalyzeAt = 0;
       audioLastBeatAt = 0;
-      audioPreviousSpectrum?.fill(0);
+      audioPreviousBands.fill(0);
     }
 
     function updateAudioDisplay(volume, targetLevel) {
@@ -717,8 +723,9 @@
         delta: clamp(readNumber("audioDelta", 0), 0, 50),
         filterVoice: $("audioFilterVoice").checked,
         filterNoise: $("audioFilterNoise").checked,
-        beatSensitivity: clamp(readNumber("audioBeatSensitivity", 1.4), 0.5, 4),
-        beatRelease: clamp(readNumber("audioBeatRelease", 180), 60, 800),
+        drumOnly: $("audioDrumOnly").checked,
+        beatSensitivity: clamp(readNumber("audioBeatSensitivity", 0.8), 0.5, 4),
+        beatRelease: clamp(readNumber("audioBeatRelease", 80), 60, 800),
       };
     }
 
@@ -753,6 +760,16 @@
       return weight;
     }
 
+    function audioBeatBandWeight(index, options) {
+      let weight = AUDIO_BEAT_BANDS[index].weight;
+      if (options.filterVoice) {
+        if (index === 2) weight *= 0.8;
+        if (index === 3) weight *= 0.28;
+        if (index === 4) weight *= 0.3;
+      }
+      return weight;
+    }
+
     function readAudioFeatures(options) {
       audioAnalyser.getByteTimeDomainData(audioData);
       let sum = 0;
@@ -766,31 +783,75 @@
       const binHz = audioContext.sampleRate / audioAnalyser.fftSize;
       let weightedPower = 0;
       let weightSum = 0;
-      let flux = 0;
-      let fluxBins = 0;
+      const beatBandPower = new Float32Array(AUDIO_BEAT_BANDS.length);
+      const beatBandCounts = new Uint16Array(AUDIO_BEAT_BANDS.length);
+      let lowBeatPower = 0;
+      let lowBeatCount = 0;
+      let voicePower = 0;
+      let voiceCount = 0;
 
       for (let i = 1; i < audioFrequencyData.length; i += 1) {
         const frequency = i * binHz;
+        const amplitude = audioFrequencyData[i] / 255;
         const weight = audioSpectrumWeight(frequency, options);
-        const current = weight > 0 ? (audioFrequencyData[i] / 255) * weight : 0;
-        const previous = audioPreviousSpectrum ? audioPreviousSpectrum[i] : 0;
 
         if (weight > 0) {
+          const current = amplitude * weight;
           weightedPower += current * current;
           weightSum += weight;
-          flux += Math.max(0, current - previous);
-          fluxBins += 1;
         }
 
-        if (audioPreviousSpectrum) {
-          audioPreviousSpectrum[i] = current;
+        for (let bandIndex = 0; bandIndex < AUDIO_BEAT_BANDS.length; bandIndex += 1) {
+          const band = AUDIO_BEAT_BANDS[bandIndex];
+          if (frequency >= band.low && frequency < band.high) {
+            beatBandPower[bandIndex] += amplitude * amplitude;
+            beatBandCounts[bandIndex] += 1;
+            break;
+          }
+        }
+
+        if (frequency >= 70 && frequency < 260) {
+          lowBeatPower += amplitude * amplitude;
+          lowBeatCount += 1;
+        }
+        if (frequency >= 300 && frequency <= 3400) {
+          voicePower += amplitude * amplitude;
+          voiceCount += 1;
         }
       }
+
+      let beatEnergy = 0;
+      let beatFlux = 0;
+      let lowBeatFlux = 0;
+      let lowBeatWeightSum = 0;
+      let beatWeightSum = 0;
+      for (let bandIndex = 0; bandIndex < AUDIO_BEAT_BANDS.length; bandIndex += 1) {
+        const bandWeight = audioBeatBandWeight(bandIndex, options);
+        const bandLevel = beatBandCounts[bandIndex] > 0
+          ? Math.sqrt(beatBandPower[bandIndex] / beatBandCounts[bandIndex]) * bandWeight
+          : 0;
+        const bandFlux = Math.max(0, bandLevel - audioPreviousBands[bandIndex]);
+        beatEnergy += bandLevel;
+        beatFlux += bandFlux;
+        beatWeightSum += bandWeight;
+        if (bandIndex <= 1) {
+          lowBeatFlux += bandFlux;
+          lowBeatWeightSum += bandWeight;
+        }
+        audioPreviousBands[bandIndex] = bandLevel;
+      }
+      beatEnergy /= Math.max(0.001, beatWeightSum);
+      beatFlux /= Math.max(0.001, beatWeightSum);
+      lowBeatFlux /= Math.max(0.001, lowBeatWeightSum);
 
       return {
         rms,
         filteredLevel: clamp(weightSum > 0 ? Math.sqrt(weightedPower / weightSum) : 0, 0, 1),
-        flux: flux / Math.max(1, fluxBins),
+        beatEnergy: clamp(beatEnergy, 0, 1),
+        beatFlux,
+        lowBeatEnergy: lowBeatCount > 0 ? Math.sqrt(lowBeatPower / lowBeatCount) : 0,
+        lowBeatFlux,
+        voiceEnergy: voiceCount > 0 ? Math.sqrt(voicePower / voiceCount) : 0,
       };
     }
 
@@ -845,25 +906,33 @@
     }
 
     function computeBeatAudioTarget(features, options, now, elapsedMs) {
-      const floor = updateAudioNoiseFloor(features.filteredLevel, options.filterNoise);
-      const gate = options.threshold + (options.filterNoise ? floor * 1.6 : 0);
+      const triggerEnergy = options.drumOnly ? features.lowBeatEnergy : features.beatEnergy;
+      const triggerFlux = options.drumOnly ? features.lowBeatFlux : features.beatFlux;
+      const floor = updateAudioNoiseFloor(triggerEnergy, options.filterNoise);
+      const gate = options.threshold + (options.filterNoise ? floor : 0);
       const { average, deviation } = audioFluxStats();
+      const minFlux = options.drumOnly ? 0.02 : (options.filterNoise ? 0.016 : 0.008);
       const fluxThreshold = Math.max(
-        options.filterNoise ? 0.0025 : 0.0012,
-        average + deviation * (2.6 / options.beatSensitivity),
+        minFlux,
+        average + deviation * (3.4 / options.beatSensitivity),
       );
+      const beatCooldown = clamp(options.beatRelease * 4, 220, 360);
       const ready = audioFluxHistory.length >= 8;
-      const inCooldown = now - audioLastBeatAt < 110;
+      const inCooldown = now - audioLastBeatAt < beatCooldown;
+      const voiceDominant = options.filterVoice
+        && features.voiceEnergy > Math.max(0.04, features.lowBeatEnergy * (options.drumOnly ? 1.1 : 1.8))
+        && features.lowBeatFlux < fluxThreshold * (options.drumOnly ? 1.4 : 0.75);
       const onset = ready
         && !inCooldown
+        && !voiceDominant
         && options.maxLevel > 0
-        && features.filteredLevel > gate
-        && features.flux > fluxThreshold;
+        && triggerEnergy > gate
+        && triggerFlux > fluxThreshold;
 
       if (onset) {
-        const fluxStrength = clamp((features.flux - fluxThreshold) / Math.max(fluxThreshold, 0.002), 0, 2);
-        const energyStrength = clamp((features.filteredLevel - gate) / Math.max(0.02, 0.18 - gate), 0, 1);
-        const beatStrength = clamp(Math.max(energyStrength, fluxStrength * 0.55) * options.gain * 0.25, 0.25, 1);
+        const fluxStrength = clamp((triggerFlux - fluxThreshold) / Math.max(fluxThreshold, minFlux), 0, 2);
+        const energyStrength = clamp((triggerEnergy - gate) / Math.max(0.02, 0.22 - gate), 0, 1);
+        const beatStrength = clamp(Math.max(energyStrength, fluxStrength * 0.65) * options.gain * 0.16, 0.28, 1);
         audioBeatEnvelope = Math.max(audioBeatEnvelope, beatStrength);
         audioLastBeatAt = now;
       } else {
@@ -874,10 +943,10 @@
         }
       }
 
-      pushAudioFlux(features.flux);
+      pushAudioFlux(triggerFlux);
 
       return {
-        displayPercent: clamp(Math.round(Math.max(audioBeatEnvelope, features.filteredLevel * 0.35) * 100), 0, 100),
+        displayPercent: clamp(Math.round(Math.max(audioBeatEnvelope, triggerEnergy * 0.35) * 100), 0, 100),
         targetLevel: mapAudioNormalizedToTarget(audioBeatEnvelope, options),
       };
     }
@@ -963,10 +1032,10 @@
       $("audioMultiplier").addEventListener("input", () => {
         $("audioMultiplierValue").textContent = `${Number($("audioMultiplier").value).toFixed(1)}x`;
       });
-      ["audioDriveMode", "audioFilterVoice", "audioFilterNoise"].forEach((id) => {
+      ["audioDriveMode", "audioFilterVoice", "audioFilterNoise", "audioDrumOnly"].forEach((id) => {
         $(id).addEventListener("change", () => {
           resetAudioAnalysisState();
-          log("audio analysis reset", { drive: $("audioDriveMode").value, voice: $("audioFilterVoice").checked, noise: $("audioFilterNoise").checked });
+          log("audio analysis reset", { drive: $("audioDriveMode").value, voice: $("audioFilterVoice").checked, noise: $("audioFilterNoise").checked, drum_only: $("audioDrumOnly").checked });
         });
       });
 
