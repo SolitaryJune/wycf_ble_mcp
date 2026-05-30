@@ -193,7 +193,9 @@ cd /Users/a24
 
 音频相关说明：
 
-- HTML 用 Web Audio 读取实时响度，支持内置/外置麦克风和 Chrome 支持的系统/标签页音频捕获。
+- HTML 用 Web Audio 读取实时音频，支持内置/外置麦克风和 Chrome 支持的系统/标签页音频捕获。
+- Web 控制台默认使用“律动/节拍”驱动：通过频谱突增检测拍点，只在明显律动时触发；切回“音量包络”并关闭过滤可恢复原始响度模式。
+- Web 控制台支持“过滤人声频段”和“过滤底噪/杂音”：人声过滤会压低约 `300-3400Hz`，底噪/杂音过滤会忽略低频轰鸣、高频嘶声并启用自适应噪声门。
 - MCP 的 `read_system_audio_volume` 读 OS 音量设置。
 - MCP 的 `map_audio_to_level` / `build_audio_level_frame` / `set_telescopic_from_audio_level` 支持阈值、增益、放大倍数 `multiplier` 和上限 `max_level`。`multiplier` 范围为 `-100..100`；负值表示反向映射：超过阈值后音量越大强度越低，低于阈值仍归零。
 

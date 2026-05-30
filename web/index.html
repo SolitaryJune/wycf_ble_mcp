@@ -263,8 +263,20 @@
         <div class="row">
           <div class="meter"><span id="audioMeterBar"></span></div>
           <span class="pill"><span id="audioDot" class="dot"></span><span id="audioState">未启动</span></span>
-          <span class="pill">音量 <strong id="audioVolume">0%</strong></span>
+          <span class="pill">检测 <strong id="audioVolume">0%</strong></span>
           <span class="pill">发送强度 <strong id="audioTarget">0</strong></span>
+        </div>
+        <div class="row">
+          <label>驱动方式
+            <select id="audioDriveMode">
+              <option value="beat" selected>律动/节拍（推荐）</option>
+              <option value="volume">音量包络</option>
+            </select>
+          </label>
+          <label><input id="audioFilterVoice" type="checkbox" checked>过滤人声频段</label>
+          <label><input id="audioFilterNoise" type="checkbox" checked>过滤底噪/杂音</label>
+          <label>节拍灵敏度 <input id="audioBeatSensitivity" type="number" min="0.5" max="4" step="0.1" value="1.4"></label>
+          <label>释放ms <input id="audioBeatRelease" type="number" min="60" max="800" value="180"></label>
         </div>
         <div class="row">
           <label>阈值 <input id="audioThreshold" type="number" min="0" max="90" value="1"></label>
@@ -276,7 +288,7 @@
           <label><input id="audioLogWrites" type="checkbox">记录每次发送</label>
           <label><input id="audioStopZero" type="checkbox" checked>停止时归零</label>
         </div>
-        <p class="hint">先连接 BLE，再点“开始联动”。“休息”只停止麦克风/屏幕音频读取，不断开 BLE，之后可继续开始联动。正倍数：音量越大强度越高；负倍数：超过阈值后音量越大强度越低；低于阈值仍归零。</p>
+        <p class="hint">默认“律动/节拍”用频谱突增检测鼓点/拍点，只在明显律动时触发；切到“音量包络”并关闭过滤，可恢复原来一有声音就按响度动的模式。人声过滤会压低约 300-3400Hz，底噪/杂音过滤会忽略低频轰鸣、高频嘶声并启用自适应噪声门。</p>
       </div>
 
       <div class="card wide">
@@ -324,10 +336,17 @@
     let audioStream = null;
     let audioAnalyser = null;
     let audioData = null;
+    let audioFrequencyData = null;
+    let audioPreviousSpectrum = null;
     let audioAnimation = 0;
     let audioLastSendAt = 0;
     let audioLastSentLevel = -1;
     let audioSendBusy = false;
+    let audioFluxHistory = [];
+    let audioBeatEnvelope = 0;
+    let audioNoiseFloor = 0;
+    let audioLastAnalyzeAt = 0;
+    let audioLastBeatAt = 0;
     let testPulseTimer = null;
     let randomTimer = null;
     let randomSendBusy = false;
@@ -617,14 +636,17 @@
 
       audioContext = new AudioContext();
       audioAnalyser = audioContext.createAnalyser();
-      audioAnalyser.fftSize = 1024;
-      audioAnalyser.smoothingTimeConstant = 0.35;
+      audioAnalyser.fftSize = 2048;
+      audioAnalyser.smoothingTimeConstant = 0.12;
       audioData = new Uint8Array(audioAnalyser.fftSize);
+      audioFrequencyData = new Uint8Array(audioAnalyser.frequencyBinCount);
+      audioPreviousSpectrum = new Float32Array(audioAnalyser.frequencyBinCount);
       audioContext.createMediaStreamSource(audioStream).connect(audioAnalyser);
+      resetAudioAnalysisState();
       audioLastSendAt = 0;
       audioLastSentLevel = -1;
       setAudioState(true, telescopicChar ? "联动中" : "仅检测音频，未连接 BLE");
-      log("audio reactive started", $("audioMode").value);
+      log("audio reactive started", { source: $("audioMode").value, drive: $("audioDriveMode").value });
       analyzeAudio();
     }
 
@@ -641,6 +663,9 @@
       audioStream = null;
       audioAnalyser = null;
       audioData = null;
+      audioFrequencyData = null;
+      audioPreviousSpectrum = null;
+      resetAudioAnalysisState();
       if (audioContext) {
         audioContext.close().catch(() => {});
         audioContext = null;
@@ -660,49 +685,225 @@
       log("audio rest", "media capture stopped, BLE kept connected");
     }
 
+    function readNumber(id, fallback) {
+      const value = Number($(id).value);
+      return Number.isFinite(value) ? value : fallback;
+    }
+
+    function resetAudioAnalysisState() {
+      audioFluxHistory = [];
+      audioBeatEnvelope = 0;
+      audioNoiseFloor = 0;
+      audioLastAnalyzeAt = 0;
+      audioLastBeatAt = 0;
+      audioPreviousSpectrum?.fill(0);
+    }
+
     function updateAudioDisplay(volume, targetLevel) {
       $("audioMeterBar").style.width = `${volume}%`;
       $("audioVolume").textContent = `${volume}%`;
       $("audioTarget").textContent = String(targetLevel);
     }
 
-    function analyzeAudio() {
-      if (!audioAnalyser || !audioData) return;
+    function getAudioOptions() {
+      const multiplierInput = Number($("audioMultiplier").value);
+      return {
+        driveMode: $("audioDriveMode").value,
+        threshold: clamp(readNumber("audioThreshold", 0), 0, 90) / 100,
+        gain: clamp(readNumber("audioGain", 1), 0.1, 20),
+        multiplier: clamp(Number.isFinite(multiplierInput) ? multiplierInput : 1, -100, 100),
+        maxLevel: clamp(readNumber("audioMaxLevel", 0), 0, 100),
+        interval: clamp(readNumber("audioInterval", 150), 80, 1000),
+        delta: clamp(readNumber("audioDelta", 0), 0, 50),
+        filterVoice: $("audioFilterVoice").checked,
+        filterNoise: $("audioFilterNoise").checked,
+        beatSensitivity: clamp(readNumber("audioBeatSensitivity", 1.4), 0.5, 4),
+        beatRelease: clamp(readNumber("audioBeatRelease", 180), 60, 800),
+      };
+    }
 
+    function audioSpectrumWeight(frequency, options) {
+      if (frequency < 20 || frequency > 12000) return 0;
+
+      let weight = 1;
+      if (options.filterNoise) {
+        if (frequency < 70) return 0;
+        if (frequency > 9000) weight *= 0.2;
+      }
+
+      if (options.driveMode === "beat") {
+        if (frequency < 70 || frequency > 5000) return 0;
+        if (frequency <= 170) {
+          weight *= 2.2; // Kick/bass pulse, usually the most stable rhythm cue.
+        } else if (frequency <= 260) {
+          weight *= 1.8;
+        } else if (frequency <= 520) {
+          weight *= 0.95;
+        } else if (frequency <= 1800) {
+          weight *= 0.65;
+        } else {
+          weight *= 0.35;
+        }
+      }
+
+      if (options.filterVoice && frequency >= 300 && frequency <= 3400) {
+        weight *= options.driveMode === "beat" ? 0.18 : 0.35;
+      }
+
+      return weight;
+    }
+
+    function readAudioFeatures(options) {
       audioAnalyser.getByteTimeDomainData(audioData);
       let sum = 0;
       for (const item of audioData) {
         const centered = (item - 128) / 128;
         sum += centered * centered;
       }
-
       const rms = Math.sqrt(sum / audioData.length);
-      const displayPercent = clamp(Math.round(rms * 350), 0, 100);
-      const threshold = clamp(Number($("audioThreshold").value) || 0, 0, 90) / 100;
-      const gain = clamp(Number($("audioGain").value) || 1, 0.1, 20);
-      const multiplierInput = Number($("audioMultiplier").value);
-      const multiplier = clamp(Number.isFinite(multiplierInput) ? multiplierInput : 1, -100, 100);
-      const maxLevel = clamp(Number($("audioMaxLevel").value) || 0, 0, 100);
-      const interval = clamp(Number($("audioInterval").value) || 150, 80, 1000);
-      const delta = clamp(Number($("audioDelta").value) || 0, 0, 50);
-      const active = rms > threshold && maxLevel > 0;
-      const normalized = clamp(((rms - threshold) / Math.max(0.01, 0.45 - threshold)) * gain, 0, 1);
-      const scaledLevel = clamp(normalized * maxLevel * Math.abs(multiplier), 0, 100);
-      const targetLevel = active
-        ? Math.round(multiplier < 0 ? clamp(maxLevel - scaledLevel, 0, 100) : scaledLevel)
-        : 0;
 
-      updateAudioDisplay(displayPercent, targetLevel);
+      audioAnalyser.getByteFrequencyData(audioFrequencyData);
+      const binHz = audioContext.sampleRate / audioAnalyser.fftSize;
+      let weightedPower = 0;
+      let weightSum = 0;
+      let flux = 0;
+      let fluxBins = 0;
+
+      for (let i = 1; i < audioFrequencyData.length; i += 1) {
+        const frequency = i * binHz;
+        const weight = audioSpectrumWeight(frequency, options);
+        const current = weight > 0 ? (audioFrequencyData[i] / 255) * weight : 0;
+        const previous = audioPreviousSpectrum ? audioPreviousSpectrum[i] : 0;
+
+        if (weight > 0) {
+          weightedPower += current * current;
+          weightSum += weight;
+          flux += Math.max(0, current - previous);
+          fluxBins += 1;
+        }
+
+        if (audioPreviousSpectrum) {
+          audioPreviousSpectrum[i] = current;
+        }
+      }
+
+      return {
+        rms,
+        filteredLevel: clamp(weightSum > 0 ? Math.sqrt(weightedPower / weightSum) : 0, 0, 1),
+        flux: flux / Math.max(1, fluxBins),
+      };
+    }
+
+    function updateAudioNoiseFloor(level, enabled) {
+      if (!enabled) return 0;
+      if (audioNoiseFloor === 0) {
+        audioNoiseFloor = level;
+        return audioNoiseFloor;
+      }
+
+      const follow = level < audioNoiseFloor ? 0.18 : 0.006;
+      audioNoiseFloor = audioNoiseFloor * (1 - follow) + level * follow;
+      return audioNoiseFloor;
+    }
+
+    function audioFluxStats() {
+      if (audioFluxHistory.length === 0) return { average: 0, deviation: 0 };
+      const average = audioFluxHistory.reduce((acc, item) => acc + item, 0) / audioFluxHistory.length;
+      const variance = audioFluxHistory.reduce((acc, item) => acc + (item - average) ** 2, 0) / audioFluxHistory.length;
+      return { average, deviation: Math.sqrt(variance) };
+    }
+
+    function pushAudioFlux(value) {
+      audioFluxHistory.push(value);
+      if (audioFluxHistory.length > 80) {
+        audioFluxHistory.shift();
+      }
+    }
+
+    function mapAudioNormalizedToTarget(normalized, options) {
+      if (normalized <= 0 || options.maxLevel <= 0) return 0;
+      const scaledLevel = clamp(normalized * options.maxLevel * Math.abs(options.multiplier), 0, 100);
+      return Math.round(options.multiplier < 0 ? clamp(options.maxLevel - scaledLevel, 0, 100) : scaledLevel);
+    }
+
+    function computeVolumeAudioTarget(features, options) {
+      const filtered = options.filterVoice || options.filterNoise;
+      const sourceLevel = filtered ? features.filteredLevel : features.rms;
+      const floor = updateAudioNoiseFloor(sourceLevel, options.filterNoise);
+      const gate = options.threshold + (options.filterNoise ? floor * 1.35 : 0);
+      const active = sourceLevel > gate && options.maxLevel > 0;
+      const normalized = active
+        ? clamp(((sourceLevel - gate) / Math.max(0.01, 0.45 - gate)) * options.gain, 0, 1)
+        : 0;
+      const displayPercent = filtered
+        ? clamp(Math.round(sourceLevel * 260), 0, 100)
+        : clamp(Math.round(features.rms * 350), 0, 100);
+      return {
+        displayPercent,
+        targetLevel: mapAudioNormalizedToTarget(normalized, options),
+      };
+    }
+
+    function computeBeatAudioTarget(features, options, now, elapsedMs) {
+      const floor = updateAudioNoiseFloor(features.filteredLevel, options.filterNoise);
+      const gate = options.threshold + (options.filterNoise ? floor * 1.6 : 0);
+      const { average, deviation } = audioFluxStats();
+      const fluxThreshold = Math.max(
+        options.filterNoise ? 0.0025 : 0.0012,
+        average + deviation * (2.6 / options.beatSensitivity),
+      );
+      const ready = audioFluxHistory.length >= 8;
+      const inCooldown = now - audioLastBeatAt < 110;
+      const onset = ready
+        && !inCooldown
+        && options.maxLevel > 0
+        && features.filteredLevel > gate
+        && features.flux > fluxThreshold;
+
+      if (onset) {
+        const fluxStrength = clamp((features.flux - fluxThreshold) / Math.max(fluxThreshold, 0.002), 0, 2);
+        const energyStrength = clamp((features.filteredLevel - gate) / Math.max(0.02, 0.18 - gate), 0, 1);
+        const beatStrength = clamp(Math.max(energyStrength, fluxStrength * 0.55) * options.gain * 0.25, 0.25, 1);
+        audioBeatEnvelope = Math.max(audioBeatEnvelope, beatStrength);
+        audioLastBeatAt = now;
+      } else {
+        const decay = Math.exp(-Math.max(0, elapsedMs || 16) / options.beatRelease);
+        audioBeatEnvelope *= decay;
+        if (audioBeatEnvelope < 0.025) {
+          audioBeatEnvelope = 0;
+        }
+      }
+
+      pushAudioFlux(features.flux);
+
+      return {
+        displayPercent: clamp(Math.round(Math.max(audioBeatEnvelope, features.filteredLevel * 0.35) * 100), 0, 100),
+        targetLevel: mapAudioNormalizedToTarget(audioBeatEnvelope, options),
+      };
+    }
+
+    function analyzeAudio() {
+      if (!audioAnalyser || !audioData || !audioFrequencyData) return;
 
       const now = performance.now();
+      const elapsedMs = audioLastAnalyzeAt ? now - audioLastAnalyzeAt : 16;
+      audioLastAnalyzeAt = now;
+      const options = getAudioOptions();
+      const features = readAudioFeatures(options);
+      const mapped = options.driveMode === "beat"
+        ? computeBeatAudioTarget(features, options, now, elapsedMs)
+        : computeVolumeAudioTarget(features, options);
+
+      updateAudioDisplay(mapped.displayPercent, mapped.targetLevel);
+
       const shouldSend = telescopicChar
-        && now - audioLastSendAt >= interval
-        && Math.abs(targetLevel - audioLastSentLevel) >= delta;
+        && now - audioLastSendAt >= options.interval
+        && Math.abs(mapped.targetLevel - audioLastSentLevel) >= options.delta;
       if (shouldSend && !audioSendBusy) {
         audioSendBusy = true;
         audioLastSendAt = now;
-        audioLastSentLevel = targetLevel;
-        setTelescopic(targetLevel, {
+        audioLastSentLevel = mapped.targetLevel;
+        setTelescopic(mapped.targetLevel, {
           label: "audio",
           quiet: !$("audioLogWrites").checked,
         }).catch((err) => log("audio write error", err.message))
@@ -761,6 +962,12 @@
       $("stopRandomBtn").addEventListener("click", () => stopRandomAuto(true));
       $("audioMultiplier").addEventListener("input", () => {
         $("audioMultiplierValue").textContent = `${Number($("audioMultiplier").value).toFixed(1)}x`;
+      });
+      ["audioDriveMode", "audioFilterVoice", "audioFilterNoise"].forEach((id) => {
+        $(id).addEventListener("change", () => {
+          resetAudioAnalysisState();
+          log("audio analysis reset", { drive: $("audioDriveMode").value, voice: $("audioFilterVoice").checked, noise: $("audioFilterNoise").checked });
+        });
       });
 
       $("levelSlider").addEventListener("input", () => {

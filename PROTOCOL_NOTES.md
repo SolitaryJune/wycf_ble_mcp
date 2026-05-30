@@ -168,7 +168,8 @@ HTML 还包含音频联动模式：
 
 - 麦克风输入：通过 `enumerateDevices()` 选择内置/外置 `audioinput`。
 - 屏幕/系统音频：通过 `getDisplayMedia({ audio: true })` 捕获，是否能取到系统声取决于浏览器和系统权限。
-- 响度算法：Web Audio `AnalyserNode` 读取 time-domain PCM，计算 RMS，按阈值、增益、上限映射到 `0..100` 伸缩强度。
+- 音频算法：Web Audio `AnalyserNode` 同时读取 time-domain PCM 和频谱。默认“律动/节拍”模式用加权频段的谱通量检测拍点，只在明显律动时触发；“音量包络”模式仍可按响度映射到 `0..100` 伸缩强度，关闭过滤后等同原始响度模式。
+- 过滤选项：人声过滤压低约 `300-3400Hz`；底噪/杂音过滤忽略低频轰鸣、高频嘶声，并用自适应噪声门减少持续环境声触发。
 
 MCP/CLI 的 `read_system_audio_volume` / `system-volume` 读取的是 OS 音量设置，不是实时响度；实时联动优先用 HTML。
 
