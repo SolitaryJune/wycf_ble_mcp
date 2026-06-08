@@ -14,7 +14,7 @@
 
 已实测：**Black Hole Max** (`TF-BHMAX`)
 
-协议逆向自官方 App，理论上支持所有使用相同 GATT 协议的 TryFun 产品线（Black Hole 系列、吮吸系列、震动蛋系列等）。
+理论上支持所有使用相同 GATT 协议的 TryFun 产品线（Black Hole 系列、吮吸系列、震动蛋系列等）。
 
 ## 快速开始
 
